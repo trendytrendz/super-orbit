@@ -1,15 +1,13 @@
 # -----------------------------------------------------------------------------
 # Stock Video Briefing Generator
-# Version: 1.1
+# Version: 1.2.4 (Frozen)
 #
 # Description: A comprehensive script to automatically generate daily financial
-#              briefing videos. This version adds Microsoft Azure Text-to-Speech
-#              as the primary, high-quality voice engine.
+#              briefing videos for a given stock symbol.
 #
-# Changes in v1.1:
-# - Integrated Microsoft Azure Speech Service for superior, free voiceovers.
-# - Reworked the voice generation logic into a robust fallback system:
-#   Azure -> ElevenLabs (optional) -> gTTS.
+# Changes in v1.2.4:
+# - Candlestick chart now uses a 60% translucent background for better
+#   readability against dynamic video backgrounds.
 # -----------------------------------------------------------------------------
 
 import argparse
@@ -41,7 +39,7 @@ from moviepy.editor import (
 )
 from moviepy.video.tools.subtitles import SubtitlesClip
 
-# NEW: Azure Speech SDK
+# Azure Speech SDK
 import azure.cognitiveservices.speech as speechsdk
 
 # Conditional Imports for optional features
@@ -66,7 +64,7 @@ import mplfinance as mpf
 # -------------------------
 # Version & Config
 # -------------------------
-__version__ = "1.1"
+__version__ = "1.2.4"
 
 VIDEO_W_LANDSCAPE, VIDEO_H_LANDSCAPE = 1280, 720
 VIDEO_W_PORTRAIT, VIDEO_H_PORTRAIT = 720, 1280
@@ -86,10 +84,15 @@ ICON_SVG = {
     "negative": '<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 -960 960 960" width="48"><path fill="#F44336" d="M480-560 280-760h400L480-560Z"/></svg>',
     "uncertain": '<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 -960 960 960" width="48"><path fill="#9E9E9E" d="M200-450h560v-60H200v60Z"/></svg>',
 }
+SOURCE_BONUS = {
+    "Yahoo Finance": 20,
+    "MoneyControl": 15,
+    "Economic Times": 10,
+    "Google News": 0
+}
 
-# -------------------------
-# Helper Functions
-# -------------------------
+# (Helper functions and Data Fetching are unchanged from v1.2.3)
+# ...
 def get_script_dir(): return os.path.dirname(os.path.realpath(__file__))
 def ensure_dirs():
     script_dir = get_script_dir()
@@ -102,9 +105,11 @@ def classify_impact(text):
     if any(k in t for k in POSITIVE_CUES): return "positive"
     if any(k in t for k in NEGATIVE_CUES): return "negative"
     return "uncertain"
-
 def make_request_with_retries(url, headers=None, timeout=15, retries=3, delay=3):
-    if headers is None: headers = {"User-Agent": "Mozilla/5.0"}
+    if headers is None:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"
+        }
     for attempt in range(retries):
         try:
             response = requests.get(url, headers=headers, timeout=timeout)
@@ -115,7 +120,6 @@ def make_request_with_retries(url, headers=None, timeout=15, retries=3, delay=3)
             if attempt < retries - 1: time.sleep(delay)
             else: raise
     return None
-
 def wrap_text_pil(text, font, max_width):
     if not text: return []
     draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
@@ -128,7 +132,6 @@ def wrap_text_pil(text, font, max_width):
             cur = [w]
     if cur: lines.append(" ".join(cur))
     return lines
-
 def get_optimal_font_size(text, initial_size, max_width, max_height, font_path):
     font_size = initial_size
     font = ImageFont.truetype(font_path, font_size)
@@ -145,7 +148,6 @@ def get_optimal_font_size(text, initial_size, max_width, max_height, font_path):
         font = ImageFont.truetype(font_path, font_size)
         width, height = get_text_dimensions(text, font)
     return font
-
 def wrap_text_for_subtitles(text, max_chars_per_line=40):
     words = text.split()
     if len(text) <= max_chars_per_line or len(words) < 5: return text.strip()
@@ -156,12 +158,7 @@ def wrap_text_for_subtitles(text, max_chars_per_line=40):
         if diff < min_diff: min_diff = diff; best_split = i
     line1 = " ".join(words[:best_split]); line2 = " ".join(words[best_split:])
     return f"{line1}\n{line2}"
-
-# -------------------------
-# Data Fetching Functions
-# -------------------------
 def resolve_symbol(query):
-    # This function and the following data fetchers use the robust `make_request_with_retries`
     url = f"https://query2.finance.yahoo.com/v1/finance/search?q={quote_plus(query)}"
     r = make_request_with_retries(url)
     data = r.json().get('quotes', [])
@@ -170,8 +167,6 @@ def resolve_symbol(query):
     best = picks[0]
     display = best.get("longname") or best.get("shortname") or best["symbol"]
     return best["symbol"].replace(".NS", ""), best["symbol"], display
-
-# (All other data fetching functions remain the same as v1.0)
 def fetch_yfinance_news(y_symbol):
     print("   -> Fetching from Yahoo Finance...")
     try:
@@ -206,28 +201,13 @@ def fetch_moneycontrol_news(query):
             if title and link: items.append({"title": title.strip(), "link": link, "published": now_ist(), "source": "MoneyControl"})
     except Exception as e: print(f"      - Could not fetch from MoneyControl: {e}")
     return items
-def fetch_business_standard_news(query):
-    print("   -> Fetching from Business Standard..."); items = []
-    try:
-        search_query = query.lower().replace(' ltd', '').replace(' limited', '').replace('&', 'and').replace(' ', '-')
-        url = f"https://www.business-standard.com/company/{search_query}"
-        r = make_request_with_retries(url)
-        soup = BeautifulSoup(r.content, 'html.parser')
-        news_list = soup.select(".listing-txt h2 a")
-        for item in news_list[:10]:
-            title = item.get_text(strip=True); link = "https://www.business-standard.com" + item.get('href')
-            if title and link: items.append({"title": title.strip(), "link": link, "published": now_ist(), "source": "Business Std."})
-    except Exception as e: print(f"      - Could not fetch from Business Standard: {e}")
-    return items
 def fetch_economic_times_news(query):
     print("   -> Fetching from Economic Times..."); items = []
     try:
-        # FIX: Changed URL generation to use the more reliable "/topic/" structure.
         search_query = query.lower().replace(' ltd', '').replace(' limited', '').replace('&', '').replace(' ', '-')
         url = f"https://economictimes.indiatimes.com/topic/{search_query}"
         r = make_request_with_retries(url)
         soup = BeautifulSoup(r.content, 'html.parser')
-        # FIX: Updated selector to match the new page structure.
         news_list = soup.select("div.story_list a")
         for item in news_list[:10]:
             title = item.get_text(strip=True)
@@ -236,12 +216,15 @@ def fetch_economic_times_news(query):
                  items.append({"title": title, "link": link, "published": now_ist(), "source": "Economic Times"})
     except Exception as e: print(f"      - Could not fetch from Economic Times: {e}")
     return items
-def score_news_relevance(headline, company_name):
-    score = 0; headline_lower = headline.lower(); company_name_short = company_name.split()[0].lower()
+def score_news_relevance(headline, company_name, source):
+    score = 0
+    headline_lower = headline.lower()
+    company_name_short = company_name.split()[0].lower()
     if headline_lower.startswith(company_name_short): score += 30
     elif company_name_short in headline_lower: score += 10
     for keyword in IMPACT_KEYWORDS:
         if keyword in headline_lower: score += 15
+    score += SOURCE_BONUS.get(source, 0)
     return score
 def fetch_financial_metrics(y_symbol):
     print("  -> Fetching key financial metrics...")
@@ -282,13 +265,15 @@ def fetch_company_logo(y_symbol):
 # -------------------------
 # Chart & Infographic Generation
 # -------------------------
-# (These functions remain the same as v1.0)
 def make_candlestick_chart(df, symbol, size, out_png="outputs/tmp/price.png"):
     df_resampled = df.tail(45)
     mc = mpf.make_marketcolors(up=ACCENT, down='#F44336', edge={'up':ACCENT, 'down':'#F44336'},
                                wick={'up':ACCENT, 'down':'#F44336'}, volume=ACCENT, ohlc='i')
+    # FIX: Use a translucent background color for better readability.
+    # The '99' at the end of the hex code sets ~60% opacity.
     s = mpf.make_mpf_style(marketcolors=mc, base_mpf_style='nightclouds',
-                           figcolor=BG_COLOR, gridcolor=mcolors.to_hex(mcolors.to_rgba(TEXT_COLOR, alpha=0.1)))
+                           figcolor=BG_COLOR + '99', gridcolor=mcolors.to_hex(mcolors.to_rgba(TEXT_COLOR, alpha=0.1)))
+                           
     fig, axlist = mpf.plot(df_resampled, type='candle', style=s,
                            title=f"\n{symbol} Price Action",
                            ylabel='Price (INR)', volume=True, ylabel_lower='Volume',
@@ -296,36 +281,41 @@ def make_candlestick_chart(df, symbol, size, out_png="outputs/tmp/price.png"):
     for ax in axlist:
         ax.yaxis.label.set_color('white'); ax.xaxis.label.set_color('white')
         for label in ax.get_xticklabels() + ax.get_yticklabels(): label.set_color('white')
+        # Make axes backgrounds transparent so the figcolor shows through
+        ax.set_facecolor((0,0,0,0))
     axlist[0].title.set_color('white')
-    fig.savefig(out_png, dpi=100, pad_inches=0.2, transparent=False, facecolor=BG_COLOR); plt.close(fig)
+    
+    # Save with transparency to capture the semi-transparent background
+    fig.savefig(out_png, dpi=100, pad_inches=0.2, transparent=True); plt.close(fig)
     return out_png
+
 def make_financials_chart(y_symbol, size, out_png="outputs/tmp/financials.png"):
     try:
         financials = yf.Ticker(y_symbol).financials.T.head(4)
         financials['Net Income'] /= 1e7; financials['Total Revenue'] /= 1e7
         plt.style.use('dark_background'); fig, ax = plt.subplots(figsize=(size[0]/100, size[1]/100), dpi=100)
+        fig.patch.set_alpha(0); ax.patch.set_alpha(0)
         financials[['Total Revenue', 'Net Income']].plot(kind='bar', ax=ax, color=[ACCENT, '#FFFFFF'])
         ax.set_title("Financial Highlights (INR Crores)", color="white", fontsize=18)
         ax.tick_params(axis='x', labelrotation=0); fig.tight_layout()
-        plt.savefig(out_png, facecolor=BG_COLOR, transparent=False); plt.close()
+        plt.savefig(out_png, transparent=True); plt.close()
         return out_png
     except Exception: return None
+
 def make_metrics_infographic(metrics, size, out_png="outputs/tmp/metrics.png"):
     plt.style.use('dark_background')
     fig, ax = plt.subplots(figsize=(size[0]/100, size[1]/100), dpi=100)
-    fig.patch.set_facecolor(BG_COLOR); ax.set_facecolor(BG_COLOR)
+    fig.patch.set_alpha(0); ax.patch.set_alpha(0)
     ax.axis('off')
-    ax.text(0.5, 0.9, "Key Metrics", color=TEXT_COLOR, fontsize=40, weight='bold', ha='center', transform=ax.transAxes)
-    metrics_list = list(metrics.items()); num_metrics = len(metrics_list)
-    cols = 2; rows = (num_metrics + cols - 1) // cols
+    ax.text(0.5, 0.9, "Key Metrics", color=TEXT_COLOR, fontsize=36, weight='bold', ha='center', transform=ax.transAxes)
+    metrics_list = list(metrics.items())
+    y_start = 0.75
     for i, (key, value) in enumerate(metrics_list):
-        row_idx = i % rows; col_idx = i // rows
-        x_pos = 0.28 + col_idx * 0.45; y_pos = 0.7 - row_idx * 0.20
-        ax.text(x_pos, y_pos, str(value), color=ACCENT, fontsize=48, weight='bold', ha='center', transform=ax.transAxes)
-        ax.text(x_pos, y_pos - 0.08, key, color=TEXT_COLOR, alpha=0.8, fontsize=20, ha='center', transform=ax.transAxes)
-    plt.savefig(out_png, facecolor=BG_COLOR, transparent=False, bbox_inches='tight', pad_inches=0.1); plt.close()
+        y_pos = y_start - i * 0.12
+        ax.text(0.1, y_pos, key, color=TEXT_COLOR, alpha=0.8, fontsize=20, ha='left', va='center', transform=ax.transAxes)
+        ax.text(0.9, y_pos, str(value), color=ACCENT, fontsize=28, weight='bold', ha='right', va='center', transform=ax.transAxes)
+    plt.savefig(out_png, transparent=True, bbox_inches='tight', pad_inches=0.1); plt.close()
     return out_png
-
 # -------------------------
 # Audio & Narration
 # -------------------------
@@ -334,27 +324,20 @@ def build_narration(company, news_items, price_info):
     dir_word = "gaining" if price_info['d_pct'] >= 0 else "down"
     script = f"""Here is your daily briefing on {company}. Recent headlines include: {news_summary}. On the market, the stock was last {dir_word} about {abs(price_info['d_pct']):.1f} percent, with a five-day change of about {abs(price_info['d5_pct']):.1f} percent. This is for informational purposes only."""
     return re.sub(r"\s+", " ", script).strip()
-
-# NEW: Azure TTS Function
 def generate_voiceover_azure(script, output_path):
-    """Generates voiceover using Azure's Speech Service."""
+    synthesizer = None
     try:
         speech_key = os.getenv("AZURE_SPEECH_KEY")
         speech_region = os.getenv("AZURE_SPEECH_REGION")
         if not all([speech_key, speech_region]):
             print("  -> Azure credentials (AZURE_SPEECH_KEY, AZURE_SPEECH_REGION) not found.")
             return False
-
         speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
-        # Professional US voice. For Indian accent, try 'en-IN-NeerjaNeural'.
         speech_config.speech_synthesis_voice_name = "en-US-JennyNeural"
-        
         audio_config = speechsdk.audio.AudioOutputConfig(filename=output_path)
         synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
-        
         print("  -> Generating voiceover with Microsoft Azure...")
         result = synthesizer.speak_text_async(script).get()
-
         if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
             print("  -> Azure voiceover successful.")
             return True
@@ -366,17 +349,14 @@ def generate_voiceover_azure(script, output_path):
             return False
     except Exception as e:
         print(f"  -> An exception occurred during Azure TTS generation: {e}")
+    finally:
+        if synthesizer:
+            del synthesizer
     return False
-
-# UPDATED: Full Fallback Logic for Voice Generation
 def generate_voiceover(script, use_elevenlabs=False):
     output_path = os.path.join(get_script_dir(), "outputs", "tmp", "vo.mp3")
-    
-    # --- 1. Try Azure First (Primary) ---
     if generate_voiceover_azure(script, output_path):
         return output_path
-        
-    # --- 2. Fallback to ElevenLabs (Optional) ---
     eleven_api_key = os.getenv("ELEVENLABS_API_KEY")
     if use_elevenlabs and ELEVENLABS_AVAILABLE and eleven_api_key:
         print("  -> Azure failed. Falling back to ElevenLabs...")
@@ -390,12 +370,9 @@ def generate_voiceover(script, use_elevenlabs=False):
             return output_path
         except Exception as e:
             print(f"  -> ElevenLabs also failed: {e}")
-
-    # --- 3. Final Fallback to gTTS ---
     print("  -> All premium TTS failed. Falling back to gTTS...")
     gTTS(text=script, lang="en", tld="co.in").save(output_path)
     return output_path
-
 def generate_subtitles(audio_path):
     try:
         print("  -> Generating subtitles with Whisper...")
@@ -404,11 +381,9 @@ def generate_subtitles(audio_path):
         return [((seg['start'], seg['end']), seg['text'].strip()) for seg in result['segments']]
     except Exception as e:
         print(f"  -> Whisper transcription failed: {e}."); return None
-
 # -------------------------
 # Video Composition
 # -------------------------
-# (This section and the main function remain the same as v1.0)
 def create_slide_image(content_elements, background_path, size, font_path):
     try:
         with Image.open(background_path) as bg_img_file:
@@ -422,7 +397,6 @@ def create_slide_image(content_elements, background_path, size, font_path):
             bg_img = Image.alpha_composite(bg_img, overlay)
     except Exception:
         bg_img = Image.new("RGB", size, BG_COLOR)
-
     draw = ImageDraw.Draw(bg_img)
     for element in content_elements:
         if element['type'] == 'text':
@@ -431,7 +405,6 @@ def create_slide_image(content_elements, background_path, size, font_path):
             line_heights = [draw.textbbox((0,0), line, font=font)[3] for line in lines]
             total_text_height = sum(line_heights) + (len(lines) - 1) * (font.size * 0.2)
             y_pos = element['position'][1] - total_text_height / 2
-
             for i, line in enumerate(lines):
                 line_width = draw.textlength(line, font=font)
                 x_pos = element['position'][0] - line_width / 2
@@ -444,37 +417,47 @@ def create_slide_image(content_elements, background_path, size, font_path):
                 img_to_paste.thumbnail(element['size'], Image.Resampling.LANCZOS)
                 bg_img.paste(img_to_paste, element['position'], img_to_paste)
     return bg_img
-
+def create_chart_slide_image(chart_path, background_path, size):
+    try:
+        with Image.open(background_path) as bg_img_file, Image.open(chart_path) as chart_img_file:
+            bg_img = bg_img_file.convert("RGBA")
+            bg_img = bg_img.resize(size, Image.Resampling.LANCZOS)
+            overlay = Image.new('RGBA', size, (0, 0, 0, 150))
+            bg_img = Image.alpha_composite(bg_img, overlay)
+            chart_img = chart_img_file.convert("RGBA")
+            chart_img.thumbnail((size[0] * 0.9, size[1] * 0.9), Image.Resampling.LANCZOS)
+            paste_x = (size[0] - chart_img.width) // 2
+            paste_y = (size[1] - chart_img.height) // 2
+            bg_img.paste(chart_img, (paste_x, paste_y), chart_img)
+            return bg_img.convert("RGB")
+    except Exception as e:
+        print(f"      - Could not create chart slide: {e}. Using chart directly.")
+        return Image.open(chart_path)
 def make_video(company, news_items, metrics, price_df, financials_chart, price_info, out_path, video_format, assets):
     VIDEO_W, VIDEO_H = (VIDEO_W_LANDSCAPE, VIDEO_H_LANDSCAPE) if video_format == 'landscape' else (VIDEO_W_PORTRAIT, VIDEO_H_PORTRAIT)
     font_path = next((p for p in FONT_PATHS_TRY if os.path.exists(p)), None)
     if font_path is None: raise IOError("Could not find a valid font file.")
     print(f"  -> Using font: {font_path}")
-
     narration = build_narration(company, news_items, price_info)
     voice_path = generate_voiceover(narration, assets.get('use_elevenlabs'))
     voice_audio = AudioFileClip(voice_path)
     total_dur = max(VIDEO_TARGET_SECS, voice_audio.duration + 2.0)
-
     try:
-        music_path = os.path.join(get_script_dir(), 'techno-music.mp3')
+        music_path = os.path.join(get_script_dir(), 'background_music.mp3')
         if os.path.exists(music_path):
             music = AudioFileClip(music_path).audio_loop(duration=total_dur).volumex(0.25)
             final_audio = CompositeAudioClip([voice_audio.set_start(0), music])
         else: final_audio = voice_audio
     except Exception: final_audio = voice_audio
-
     slide_paths, slide_durations = [], []
     bg_images = assets.get('bg_images', [])
     bg_idx = 0
-
     d_title = 5.0; d_news_each = 8.0; d_price_chart = 12.0
     d_financials_chart = 10.0 if financials_chart else 0
     d_metrics = 10.0 if metrics else 0
     num_news_slides = len(news_items)
     base_duration = d_title + (d_news_each * num_news_slides) + d_price_chart + d_financials_chart + d_metrics
     if num_news_slides > 0: d_news_each += max(0, total_dur - base_duration) / num_news_slides
-
     print("   -> Generating slide 1: Title")
     content = [{"type": "text", "text": f"{company}\nDaily Briefing", "position": (VIDEO_W / 2, VIDEO_H * 0.6), "box": (VIDEO_W * 0.8, VIDEO_H * 0.4), "initial_fontsize": 90}]
     if assets.get('logo'):
@@ -486,7 +469,6 @@ def make_video(company, news_items, metrics, price_df, financials_chart, price_i
     slide_img = create_slide_image(content, bg_images[bg_idx % len(bg_images)] if bg_images else None, (VIDEO_W, VIDEO_H), font_path)
     path = os.path.join(get_script_dir(), "outputs", "tmp", "slide_0.jpg"); slide_img.convert("RGB").save(path)
     slide_paths.append(path); slide_durations.append(d_title); bg_idx += 1
-
     for i, item in enumerate(news_items):
         print(f"   -> Generating slide {i+2}: News")
         sentiment = classify_impact(item['title'])
@@ -499,22 +481,28 @@ def make_video(company, news_items, metrics, price_df, financials_chart, price_i
         slide_img = create_slide_image(content, bg_images[bg_idx % len(bg_images)] if bg_images else None, (VIDEO_W, VIDEO_H), font_path)
         path = os.path.join(get_script_dir(), "outputs", "tmp", f"slide_news_{i}.jpg"); slide_img.convert("RGB").save(path)
         slide_paths.append(path); slide_durations.append(d_news_each); bg_idx += 1
-
+    chart_bg = bg_images[bg_idx % len(bg_images)] if bg_images else None
     print("   -> Generating slide: Price Chart")
-    chart_path = make_candlestick_chart(price_df, company, (VIDEO_W, VIDEO_H))
-    slide_paths.append(chart_path); slide_durations.append(d_price_chart)
+    price_chart_path = make_candlestick_chart(price_df, company, (VIDEO_W, VIDEO_H))
+    price_slide_img = create_chart_slide_image(price_chart_path, chart_bg, (VIDEO_W, VIDEO_H))
+    path = os.path.join(get_script_dir(), "outputs", "tmp", "slide_price.jpg"); price_slide_img.save(path)
+    slide_paths.append(path); slide_durations.append(d_price_chart); bg_idx += 1
     if financials_chart:
         print("   -> Generating slide: Financials Chart")
-        slide_paths.append(financials_chart); slide_durations.append(d_financials_chart)
+        chart_bg = bg_images[bg_idx % len(bg_images)] if bg_images else None
+        financials_slide_img = create_chart_slide_image(financials_chart, chart_bg, (VIDEO_W, VIDEO_H))
+        path = os.path.join(get_script_dir(), "outputs", "tmp", "slide_financials.jpg"); financials_slide_img.save(path)
+        slide_paths.append(path); slide_durations.append(d_financials_chart); bg_idx += 1
     if metrics:
         print("   -> Generating slide: Metrics Infographic")
+        chart_bg = bg_images[bg_idx % len(bg_images)] if bg_images else None
         metrics_graphic_path = make_metrics_infographic(metrics, (VIDEO_W, VIDEO_H))
-        slide_paths.append(metrics_graphic_path); slide_durations.append(d_metrics)
-
+        metrics_slide_img = create_chart_slide_image(metrics_graphic_path, chart_bg, (VIDEO_W, VIDEO_H))
+        path = os.path.join(get_script_dir(), "outputs", "tmp", "slide_metrics.jpg"); metrics_slide_img.save(path)
+        slide_paths.append(path); slide_durations.append(d_metrics)
     print("\n  -> Stitching slides into video...")
     clips = [ImageClip(p).set_duration(d) for p, d in zip(slide_paths, slide_durations)]
     video = concatenate_videoclips(clips, method="compose").set_duration(sum(slide_durations)).resize(width=VIDEO_W)
-
     composited_elements = [video]
     subtitles_data = generate_subtitles(voice_path)
     if subtitles_data:
@@ -523,16 +511,13 @@ def make_video(company, news_items, metrics, price_df, financials_chart, price_i
             return TextClip(wrapped, font=font_path, fontsize=38, color='white', stroke_color='#000000CC', stroke_width=2.5, align='center', method='caption')
         subtitle_clip = SubtitlesClip(subtitles_data, subtitle_generator).set_position(('center', 0.88), relative=True)
         composited_elements.append(subtitle_clip)
-
     footer_clip = TextClip(txt="Sources: Multiple. Not financial advice.", fontsize=20, color='gray', font=font_path).set_position(('center', VIDEO_H * 0.95))
     composited_elements.append(footer_clip)
     if assets.get('bg_credit'):
         credit_clip = TextClip(txt=assets['bg_credit'], fontsize=16, color='gray', font=font_path).set_position((10, VIDEO_H - 30))
         composited_elements.append(credit_clip)
-
     final_video = CompositeVideoClip(composited_elements).set_duration(total_dur)
     final_video.audio = final_audio
-
     print("  -> Writing final video file...")
     final_video.write_videofile(out_path, fps=24, codec="libx264", audio_codec="aac", bitrate="3000k", threads=4, preset="medium", logger='bar')
     voice_audio.close()
@@ -559,19 +544,20 @@ def main():
 
         print("\n2. Fetching & Scoring News...")
         all_news = (fetch_yfinance_news(y_symbol) + fetch_google_news(display, nse_symbol) +
-                    fetch_moneycontrol_news(display) + fetch_business_standard_news(display) + fetch_economic_times_news(display))
-        scored_news = [{**item, 'score': score_news_relevance(item['title'], display)} for item in all_news]
+                    fetch_moneycontrol_news(display) + fetch_economic_times_news(display))
+        
+        scored_news = [{**item, 'score': score_news_relevance(item['title'], display, item['source'])} for item in all_news]
+        
         unique_news = []
         for news_item in sorted(scored_news, key=lambda x: x['score'], reverse=True):
             if not any(seq_ratio(news_item['title'], unique['title']) > 0.85 for unique in unique_news):
                 unique_news.append(news_item)
         news_items = unique_news[:MAX_NEWS_ITEMS]
         if not news_items: print("   -> No relevant news found. Exiting."); return
-        print(f"   -> Top {len(news_items)} headlines selected.")
-        # NEW: Display the final selected news items in the console
+        
         print(f"\n✅ Top {len(news_items)} headlines selected for the video:")
         for i, item in enumerate(news_items):
-            print(f"   {i+1}. {item['title']} (Source: {item['source']})")
+            print(f"   {i+1}. {item['title']} (Source: {item['source']}, Score: {item['score']})")
 
         print("\n3. Fetching financial & price data...")
         df = fetch_price_data(y_symbol)
@@ -586,7 +572,12 @@ def main():
         print("\n5. Fetching visual assets...")
         assets = {'use_elevenlabs': args.elevenlabs, 'bg_images': []}
         assets['logo'] = fetch_company_logo(y_symbol)
-        num_bgs_needed = 2 + len(news_items)
+        
+        num_bgs_needed = 1 + len(news_items)
+        if not df.empty: num_bgs_needed += 1
+        if financials_chart: num_bgs_needed += 1
+        if metrics: num_bgs_needed += 1
+
         search_queries = [f"{display.split()[0]} abstract", "data visualization", "stock market", "business analytics", "corporate meeting"]
         random.shuffle(search_queries)
         if PEXELS_AVAILABLE and os.getenv("PEXELS_API_KEY"):
