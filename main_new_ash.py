@@ -639,7 +639,7 @@ def make_video(company, news_items, metrics, price_df, df_index, shareholding_ch
     total_dur = sum(slide_durations)
     narration_audio = CompositeAudioClip(audio_clips_timeline)
     try:
-        music_path = os.path.join(get_script_dir(), 'background_music.mp3')
+        music_path = os.path.join(get_script_dir(), 'Ruff_Money.mp3')
         if os.path.exists(music_path):
             music = AudioFileClip(music_path).audio_loop(duration=total_dur).volumex(0.25)
             final_audio = CompositeAudioClip([narration_audio, music])
