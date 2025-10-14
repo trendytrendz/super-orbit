@@ -2,7 +2,7 @@
 import os
 
 # Version
-__version__ = "5.0.0"
+__version__ = "8.0.0"
 
 # Video Dimensions
 # ... (rest of the file is unchanged)
