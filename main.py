@@ -15,7 +15,7 @@ try:
     PEXELS_AVAILABLE = True
 except ImportError:
     PEXELS_AVAILABLE = False
-git s
+
 # --- PEXELS HELPER FUNCTION ---
 def fetch_pexels_bgs(num_bgs_needed, search_term, video_format):
     assets = {}
