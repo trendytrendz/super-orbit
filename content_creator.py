@@ -12,17 +12,18 @@ def build_narration_news(company, news_items, price_info):
     for i, item in enumerate(news_items): script_parts[f"news_{i+1}"] = item['title'] + ". ..."
     return script_parts
 
-def build_narration_deepdive(company, metrics, shareholding):
+def build_narration_deepdive(company, profile, metrics, shareholding):
     print("  -> Building narration for 'Deep Dive' video.")
     script_parts = {}
     script_parts["intro"] = f"What is the business behind {company}? Let's take a deep dive into its fundamentals in under 2 minutes. ..."
+    if profile: script_parts["profile"] = f"First, what do they do? {profile} ..."
     market_cap = metrics.get("Market Cap (Cr)", "an unknown") if metrics else "an unknown"; pe_ratio = metrics.get("P/E Ratio", "unavailable") if metrics else "unavailable"
-    script_parts["metrics"] = f"To understand its scale, {company} has a market capitalization of {market_cap} crore rupees. Its Price to Earnings ratio is currently {pe_ratio}, giving us a hint about its market valuation. ..."
+    script_parts["metrics"] = f"To understand its scale, {company} has a market capitalization of {market_cap} crore rupees. Its Price to Earnings ratio is currently {pe_ratio}. ..."
     script_parts["financials"] = f"A look at their financial performance shows a trend in revenue and net income over the past few years. This chart illustrates their recent financial health. ..."
     if shareholding and 'Promoter' in shareholding:
         promoter_holding = shareholding.get('Promoter', 0)
         script_parts["shareholding"] = f"So, who owns the company? Promoters hold about {promoter_holding:.1f} percent of the shares. The rest is held by institutions and the public. ..."
-    script_parts["market"] = f"Finally, looking at the one-year price chart, we can see the stock's journey, providing context on its recent performance against the broader market. ..."
+    script_parts["market"] = f"Finally, looking at the one-year price chart, we can see the stock's journey, providing context on its recent performance. ..."
     script_parts["cta"] = "If you found this breakdown helpful, like this video and comment which company you want us to analyze next. Subscribe for more deep dives."
     return script_parts
 
@@ -38,16 +39,18 @@ def build_narration_comparison(name_a, name_b, metrics_a, metrics_b):
     script_parts["cta"] = f"Which company do you think is better? Let us know in the comments! Like and subscribe for more stock comparisons."
     return script_parts
 
-def build_narration_spotlight(company, metrics, shareholding):
+def build_narration_spotlight(company, metrics, shareholding, peers_exist):
     print("  -> Building narration for 'Portfolio Spotlight' video.")
     script_parts = {}
     pe_ratio_val = metrics.get("P/E Ratio", "not available") if metrics else "not available"; promoter_holding = shareholding.get('Promoter', 0) if shareholding else 0
-    script_parts["intro"] = f"How would a famous investor analyze {company}? Let's look at it through the lens of value investing principles, focusing on profitability, valuation, and ownership. ..."
-    script_parts["financials"] = "First, profitability. Great investors often look for companies with consistent and growing earnings. This chart of revenue and net income gives us a clue about the company's financial stability over time. ..."
-    script_parts["valuation"] = f"Next, let's talk valuation. The current Price to Earnings ratio is {pe_ratio_val}. Value investors use this metric to gauge if a stock might be over or undervalued compared to its peers and its own history. ..."
+    script_parts["intro"] = f"How would a value investor analyze {company}? Let's look at it through three key lenses: Profitability, Ownership, and Valuation. ..."
+    script_parts["financials"] = "First, profitability. Investors look for companies with consistent earnings. This chart of revenue and net income gives us a clue about the company's financial stability over time. ..."
     if shareholding and promoter_holding > 10:
-        script_parts["ownership"] = f"Finally, ownership. With promoters holding {promoter_holding:.1f} percent, it shows they have significant 'skin in the game,' which can align their interests with those of shareholders. ..."
-    script_parts["summary"] = "By examining profitability, valuation, and ownership, we can build a more complete picture of a company, much like a seasoned investor would before making a decision. ..."
+        script_parts["ownership"] = f"Second, ownership. With promoters holding {promoter_holding:.1f} percent, it shows they have significant 'skin in the game,' which can align their interests with those of shareholders. ..."
+    script_parts["valuation"] = f"Third, valuation. The current Price to Earnings ratio is {pe_ratio_val}. This metric helps investors gauge if a stock is reasonably priced. ..."
+    if peers_exist:
+        script_parts["peers"] = f"But a P/E ratio is best seen with context. Here's how {company}'s valuation compares to some of its closest peers in the industry. ..."
+    script_parts["summary"] = "By examining profitability, ownership, and valuation in context, we can build a more complete picture of a company, much like a seasoned investor would. ..."
     script_parts["cta"] = "Enjoyed this analysis? Like and subscribe for more investing case studies. Comment below with a stock you're curious about."
     return script_parts
 

@@ -20,21 +20,44 @@ def make_single_metric_chart(metric_name, metric_value, company_name, size, them
     fig, ax = plt.subplots(figsize=(size[0]/100, size[1]/100), dpi=100)
     fig.patch.set_alpha(0)
     ax.patch.set_alpha(0)
-
     val_str = str(metric_value) if metric_value else "N/A"
     text_obj = ax.text(0.5, 0.55, val_str, ha='center', va='center', fontsize=120, color=theme['accent'], weight='bold', transform=ax.transAxes)
     text_obj.set_path_effects(TEXT_EFFECT)
-
     sub_text_obj = ax.text(0.5, 0.35, metric_name, ha='center', va='center', fontsize=40, color=CHART_TEXT_COLOR, transform=ax.transAxes)
     sub_text_obj.set_path_effects(TEXT_EFFECT)
-    
     title_obj = ax.text(0.5, 0.85, f"{company_name}\nValuation Snapshot", ha='center', va='center', fontsize=30, color=CHART_TEXT_COLOR, transform=ax.transAxes)
     title_obj.set_path_effects(TEXT_EFFECT)
-    
     ax.axis('off')
     plt.savefig(out_png, transparent=True, bbox_inches='tight', pad_inches=0.1)
     plt.close()
     return out_png
+
+def make_peer_comparison_chart(peer_data, company_name, size, theme, out_png="outputs/tmp/peer_comp.png"):
+    print("   -> Generating peer comparison chart...")
+    try:
+        tickers = list(peer_data.keys())
+        pe_ratios = list(peer_data.values())
+        plt.style.use('dark_background')
+        fig, ax = plt.subplots(figsize=(size[0]/100, size[1]/100), dpi=100)
+        fig.patch.set_alpha(0)
+        ax.patch.set_alpha(0)
+        bars = ax.barh(tickers, pe_ratios, color=theme['accent'])
+        ax.invert_yaxis()
+        for bar in bars:
+            text_obj = ax.text(bar.get_width() + 0.5, bar.get_y() + bar.get_height()/2, f'{bar.get_width():.2f}', va='center', ha='left', color=CHART_TEXT_COLOR, weight='bold')
+            text_obj.set_path_effects(TEXT_EFFECT)
+        ax.set_title(f"Peer Comparison (P/E Ratio)", color=CHART_TEXT_COLOR, fontsize=18, path_effects=TEXT_EFFECT)
+        ax.tick_params(axis='y', colors=CHART_TEXT_COLOR)
+        ax.tick_params(axis='x', colors=CHART_TEXT_COLOR)
+        for label in ax.get_yticklabels():
+            label.set_path_effects(TEXT_EFFECT)
+        fig.tight_layout()
+        plt.savefig(out_png, transparent=True)
+        plt.close()
+        return out_png
+    except Exception as e:
+        print(f"      - Could not generate peer comparison chart: {e}")
+        return None
 
 def make_comparison_bar_chart(metric_name, value_a, value_b, name_a, name_b, size, theme, out_png="outputs/tmp/comparison.png"):
     print(f"   -> Generating comparison chart for: {metric_name}")

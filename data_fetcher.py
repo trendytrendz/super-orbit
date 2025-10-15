@@ -11,12 +11,34 @@ from datetime import datetime, timezone
 from io import BytesIO
 from PIL import Image
 from bs4 import BeautifulSoup
+from difflib import SequenceMatcher
 
 from utils import make_request_with_retries, now_ist
 import config
 
-# --- Symbol Resolution ---
+CACHE_FILE = 'symbol_cache.json'
+
+def load_cache():
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, 'r') as f:
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                return {}
+    return {}
+
+def save_cache(cache):
+    with open(CACHE_FILE, 'w') as f:
+        json.dump(cache, f, indent=2)
+
 def resolve_symbol(query):
+    cache = load_cache()
+    query_key = query.upper()
+    if query_key in cache:
+        print(f"   -> Found '{query_key}' in cache. Skipping API calls.")
+        cached = cache[query_key]
+        return cached['nse'], cached['yahoo'], cached['display']
+    print(f"   -> '{query_key}' not in cache. Performing live lookup...")
     try:
         print("   -> Trying to resolve symbol via Yahoo Finance API...")
         url = f"https://query2.finance.yahoo.com/v1/finance/search?q={quote_plus(query)}"
@@ -27,23 +49,27 @@ def resolve_symbol(query):
         if picks:
             best = picks[0]
             display = best.get("longname") or best.get("shortname") or best["symbol"]
-            print("      - Symbol found via Yahoo Finance.")
-            return best["symbol"].replace(".NS", ""), best["symbol"], display
+            nse_symbol = best["symbol"].replace(".NS", "")
+            yahoo_symbol = best["symbol"]
+            print(f"      - Symbol found via Yahoo Finance: {nse_symbol}")
+            cache[query_key] = {'nse': nse_symbol, 'yahoo': yahoo_symbol, 'display': display}
+            save_cache(cache)
+            return nse_symbol, yahoo_symbol, display
     except Exception as e:
         print(f"      - Yahoo Finance API failed: {e}. Trying local NSE fallback.")
-    
-    print("   -> Trying to resolve symbol via local NSE list...")
+    print("   -> Trying to resolve symbol via local NSE list (with fuzzy search)...")
     nse_file = 'nse_symbols.csv'
     if not os.path.exists(nse_file) or (time.time() - os.path.getmtime(nse_file)) > 7 * 86400:
         update_nse_symbol_list(nse_file)
-    
     match = resolve_symbol_from_nse_local(query, nse_file)
     if match is not None:
         nse_symbol = match['SYMBOL']
         display_name = match['NAME OF COMPANY']
-        print(f"      - Symbol found via local NSE list: {nse_symbol}")
-        return nse_symbol, f"{nse_symbol}.NS", display_name
-    
+        yahoo_symbol = f"{nse_symbol}.NS"
+        print(f"      - Best fuzzy match found via local NSE list: {nse_symbol}")
+        cache[query_key] = {'nse': nse_symbol, 'yahoo': yahoo_symbol, 'display': display_name}
+        save_cache(cache)
+        return nse_symbol, yahoo_symbol, display_name
     raise ValueError(f"Could not find symbol for '{query}' from any source.")
 
 def update_nse_symbol_list(file_path='nse_symbols.csv'):
@@ -64,18 +90,27 @@ def resolve_symbol_from_nse_local(query, file_path='nse_symbols.csv'):
         df = pd.read_csv(file_path)
         df.columns = df.columns.str.strip()
         query_lower = query.lower()
-        match = df[df['SYMBOL'].str.lower() == query_lower]
-        if not match.empty:
-            return match.iloc[0]
-        match = df[df['NAME OF COMPANY'].str.lower().str.contains(query_lower)]
-        if not match.empty:
-            return match.iloc[0]
-        return None
+        best_match = None
+        highest_score = 0.0
+        for index, row in df.iterrows():
+            symbol = str(row['SYMBOL']).lower()
+            company_name = str(row['NAME OF COMPANY']).lower()
+            symbol_score = SequenceMatcher(None, query_lower, symbol).ratio()
+            name_score = SequenceMatcher(None, query_lower, company_name).ratio()
+            if query_lower in company_name:
+                name_score = max(name_score, 0.7)
+            current_score = max(symbol_score * 1.0, name_score * 0.8)
+            if current_score > highest_score:
+                highest_score = current_score
+                best_match = row
+        if highest_score > 0.6:
+            return best_match
+        else:
+            return None
     except Exception as e:
-        print(f"      - Error searching local NSE list: {e}")
+        print(f"      - Error during fuzzy search on local NSE list: {e}")
         return None
 
-# --- News Fetching ---
 def fetch_yfinance_news(y_symbol):
     print("   -> Fetching from Yahoo Finance...")
     try:
@@ -97,9 +132,7 @@ def fetch_yfinance_news(y_symbol):
 
 def fetch_google_news(name, symbol, days=7):
     print("   -> Fetching from Google News...")
-    items = []
-    now = now_ist()
-    q = f'"{name}" OR {symbol} when:{days}d'
+    items = []; now = now_ist(); q = f'"{name}" OR {symbol} when:{days}d'
     feed_url = f"https://news.google.com/rss/search?q={quote_plus(q)}&hl=en-IN&gl=IN&ceid=IN:en"
     feed = feedparser.parse(feed_url)
     for e in feed.entries:
@@ -107,8 +140,7 @@ def fetch_google_news(name, symbol, days=7):
             published = datetime.fromtimestamp(time.mktime(e.published_parsed), tz=timezone.utc).astimezone(now.tzinfo)
             if (now - published).days <= days:
                 items.append({"title": e.title.strip(), "link": e.link, "published": published, "source": "Google News"})
-        except:
-            continue
+        except: continue
     return items
 
 def fetch_moneycontrol_news(query):
@@ -121,8 +153,7 @@ def fetch_moneycontrol_news(query):
         soup = BeautifulSoup(r.content, 'html.parser', from_encoding='utf-8')
         news_list = soup.select("#cagetory a")
         for item in news_list[:10]:
-            title = item.get('title')
-            link = item.get('href')
+            title = item.get('title'); link = item.get('href')
             if title and link:
                 items.append({"title": title.strip(), "link": link, "published": now_ist(), "source": "MoneyControl"})
     except Exception as e:
@@ -158,7 +189,7 @@ def fetch_trendlyne_announcements(nse_symbol):
             return []
         lines = search_res.text.strip().split('\n')
         if len(lines) < 2 or len(lines[1].split('|')) < 3:
-            print(f"      - Could not find BSE Security Code for {nse_symbol}. Skipping.")
+            print(f"      - Could not find valid BSE Security Code for {nse_symbol}. Skipping.")
             return []
         bse_code = lines[1].split('|')[2].strip()
         trendlyne_url = f"https://trendlyne.com/company/{bse_code}/{nse_symbol.lower()}/corporate-announcements/"
@@ -181,20 +212,50 @@ def fetch_trendlyne_announcements(nse_symbol):
         return []
 
 def score_news_relevance(headline, company_name, source):
-    score = 0
-    headline_lower = headline.lower()
-    company_name_short = company_name.split()[0].lower()
-    if headline_lower.startswith(company_name_short):
-        score += 30
-    elif company_name_short in headline_lower:
-        score += 10
+    score = 0; headline_lower = headline.lower(); company_name_short = company_name.split()[0].lower()
+    if headline_lower.startswith(company_name_short): score += 30
+    elif company_name_short in headline_lower: score += 10
     for keyword in config.IMPACT_KEYWORDS:
-        if keyword in headline_lower:
-            score += 15
+        if keyword in headline_lower: score += 15
     score += config.SOURCE_BONUS.get(source, 0)
     return score
-    
-# --- Financial Data Fetching ---
+
+def fetch_company_profile(y_symbol):
+    print("  -> Fetching company business summary...")
+    try:
+        ticker = yf.Ticker(y_symbol)
+        summary = ticker.info.get('longBusinessSummary')
+        if summary:
+            summary = summary.split('.')[0] + '.'
+            if len(summary) > 400:
+                summary = summary[:400].rsplit(' ', 1)[0] + '...'
+            return summary
+        return None
+    except Exception as e:
+        print(f"      - Could not fetch company profile: {e}")
+        return None
+
+def fetch_peer_data(nse_symbol):
+    print("  -> Fetching peer comparison data...")
+    try:
+        api_url = f"https://api.tickertape.in/stocks/peers/{nse_symbol}"
+        print(f"      - Querying TickerTape Peers API: {api_url}")
+        api_response = make_request_with_retries(api_url)
+        api_data = api_response.json()
+        if not api_data.get("success", False) or not api_data.get("data"):
+            print("      - WARNING: Peer data not found in API response. Skipping peer chart.")
+            return None
+        peers = api_data["data"][:4]
+        peer_metrics = {}
+        for peer in peers:
+            pe_ratio = peer.get("ratios", {}).get("pe")
+            if pe_ratio:
+                peer_metrics[peer.get("info", {}).get("ticker")] = pe_ratio
+        return peer_metrics
+    except Exception as e:
+        print(f"      - WARNING: An error occurred fetching peer data from TickerTape: {e}.")
+        return None
+
 def fetch_shareholding(nse_symbol):
     print("  -> Fetching shareholding pattern from TickerTape...")
     try:

@@ -2,10 +2,9 @@
 import os
 
 # Version
-__version__ = "8.0.0"
+__version__ = "10.1.0"
 
 # Video Dimensions
-# ... (rest of the file is unchanged)
 VIDEO_W_LANDSCAPE, VIDEO_H_LANDSCAPE = 1280, 720
 VIDEO_W_PORTRAIT, VIDEO_H_PORTRAIT = 720, 1280
 BG_COLOR = "#080C14"
@@ -38,17 +37,15 @@ NEGATIVE_CUES = [
     "resigns", "resignation", "loss", "downgrade", "penalty", "pledge",
     "fraud", "default", "investigation"
 ]
-# *** FIX: Replace BSE with the more reliable Trendlyne ***
 SOURCE_BONUS = {
     "Yahoo Finance": 20,
     "MoneyControl": 15,
     "Economic Times": 10,
     "Google News": 0,
-    "Trendlyne Announcements": 25 # High score for a reliable source
+    "Trendlyne Announcements": 25
 }
 
 # Outro Icons (SVG)
-# ... (rest of the file is unchanged)
 OUTRO_ICONS = {
     "like": '<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 -960 960 960" width="48"><path fill="#FFFFFF" d="M720-120H280v-520l280-280 50 50q7 7 11.5 19t4.5 23v14l-44 214h258q32 0 56 24t24 56v80q0 7-2 15t-4 15L794-168q-9 20-30 34t-44 14Zm-360-80h360l120-280v-80H480l54-260-174 174v446Zm0 80Z"/></svg>',
     "comment": '<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 -960 960 960" width="48"><path fill="#FFFFFF" d="M240-400h480v-80H240v80Zm0-120h480v-80H240v80Zm0-120h480v-80H240v80ZM80-80v-720q0-33 23.5-56.5T160-880h640q33 0 56.5 23.5T880-800v480q0 33-23.5 56.5T800-240H240L80-80Zm80-200h640v-480H160v525l40-45Z"/></svg>',
