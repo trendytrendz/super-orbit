@@ -234,7 +234,53 @@ def fetch_company_profile(y_symbol):
     except Exception as e:
         print(f"      - Could not fetch company profile: {e}")
         return None
+    
+# --- NEW & ENHANCED DATA FUNCTIONS ---
+def fetch_company_details(y_symbol):
+    """Fetches a dictionary of multiple key details: summary, executives, sector, ROE."""
+    print("  -> Fetching detailed company info (profile, execs, ROE)...")
+    details = {
+        "summary": None,
+        "ceo": None,
+        "sector": None,
+        "industry": None,
+        "returnOnEquity": None
+    }
+    try:
+        ticker = yf.Ticker(y_symbol)
+        info = ticker.info
 
+        # Business Summary
+        summary = info.get('longBusinessSummary')
+        if summary:
+            summary = summary.split('.')[0] + '.'
+            if len(summary) > 400:
+                summary = summary[:400].rsplit(' ', 1)[0] + '...'
+            details['summary'] = summary
+        
+        # Key Executives (find the CEO)
+        execs = info.get('companyOfficers', [])
+        if execs:
+            # Find the person with 'CEO' or 'Chief Executive Officer' in their title
+            ceo_officer = next((p for p in execs if 'CEO' in p.get('title', '') or 'Chief Executive Officer' in p.get('title', '')), None)
+            if ceo_officer:
+                details['ceo'] = ceo_officer.get('name')
+            elif execs: # Fallback to the first person listed if no CEO found
+                details['ceo'] = execs[0].get('name')
+
+        # Sector and Industry
+        details['sector'] = info.get('sector')
+        details['industry'] = info.get('industry')
+
+        # Return on Equity (ROE)
+        details['returnOnEquity'] = info.get('returnOnEquity')
+        if details['returnOnEquity']:
+            details['returnOnEquity'] = f"{details['returnOnEquity'] * 100:.2f}%" # Format as percentage
+
+        return details
+    except Exception as e:
+        print(f"      - Could not fetch some company details: {e}")
+        return details # Return what we have, even if partial
 def fetch_peer_data(nse_symbol):
     print("  -> Fetching peer comparison data...")
     try:

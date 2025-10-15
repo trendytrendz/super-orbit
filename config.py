@@ -1,13 +1,15 @@
 # config.py
 import os
 
-# Version
-__version__ = "10.1.0"
 
-# Video Dimensions
+# Version
+__version__ = "11.0.6"
+
+# Video Dimensions & Timings
 VIDEO_W_LANDSCAPE, VIDEO_H_LANDSCAPE = 1280, 720
 VIDEO_W_PORTRAIT, VIDEO_H_PORTRAIT = 720, 1280
 BG_COLOR = "#080C14"
+TITLE_SLIDE_DURATION = 3.0 # Duration in seconds for silent title slides
 
 # Font Discovery
 FONT_PATHS = [

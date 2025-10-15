@@ -16,11 +16,61 @@ try:
 except ImportError:
     PEXELS_AVAILABLE = False
 
+# --- PEXELS HELPER FUNCTION ---
+def fetch_pexels_bgs(num_bgs_needed, search_term, video_format):
+    assets = {}
+    if not (PEXELS_AVAILABLE and os.getenv("PEXELS_API_KEY")):
+        return assets
+
+    print(f"\n   -> Fetching {num_bgs_needed} background images from Pexels...")
+    try:
+        api = API(os.getenv("PEXELS_API_KEY"))
+        clean_search_term = search_term.split()[0]
+        search_queries = [f"{clean_search_term} abstract", "data visualization", "stock market", "business analytics"]
+        random.shuffle(search_queries)
+        is_portrait = (video_format == 'portrait')
+        bg_image_paths = []
+        found_urls = set()
+
+        for query in search_queries:
+            if len(bg_image_paths) >= num_bgs_needed: break
+            api.search(query, page=random.randint(1, 5), results_per_page=80)
+            
+            for photo in api.get_entries():
+                if len(bg_image_paths) >= num_bgs_needed: break
+                if photo.url in found_urls: continue
+                
+                correct_orientation = (photo.height > photo.width) if is_portrait else (photo.width > photo.height)
+                if not correct_orientation: continue
+
+                if hasattr(photo, 'large2x'):
+                    img_url = photo.large2x
+                    print(f"      - Downloading background: {os.path.basename(img_url)}")
+                    img_path = os.path.join(utils.get_script_dir(), "outputs", "tmp", f"bg_{len(bg_image_paths)}.jpg")
+                    response = utils.make_request_with_retries(img_url, timeout=60)
+                    if response:
+                        with open(img_path, 'wb') as f: f.write(response.content)
+                        try:
+                            Image.open(img_path).verify()
+                            bg_image_paths.append(img_path)
+                            found_urls.add(photo.url)
+                        except (IOError, SyntaxError):
+                            print(f"      -  WARNING: Downloaded file {img_path} is corrupt. Skipping.")
+        
+        assets['bg_images'] = bg_image_paths
+        assets['bg_credit'] = "Photos by Pexels" if bg_image_paths else None
+        if not bg_image_paths:
+            print("      -  WARNING: Pexels search returned no suitable images after filtering.")
+    except Exception as e:
+        print(f"      -  WARNING: Pexels API failed: {e}. Continuing with solid color backgrounds.")
+    
+    return assets
+
 # --- STORY SCRIPTS ---
 def run_story_news(query, video_format, out_path, theme, icon_svg):
     import data_fetcher, chart_generator, content_creator, video_renderer
     print("Running Story: News Reporter")
-    # --- Pass 1: Content & Blueprint ---
+    # Pass 1: Content & Blueprint
     nse_symbol, y_symbol, display = data_fetcher.resolve_symbol(query)
     all_news = (data_fetcher.fetch_yfinance_news(y_symbol) + data_fetcher.fetch_google_news(display, nse_symbol) +
                 data_fetcher.fetch_moneycontrol_news(display) + data_fetcher.fetch_economic_times_news(display) +
@@ -29,17 +79,15 @@ def run_story_news(query, video_format, out_path, theme, icon_svg):
     unique_news = []; [unique_news.append(item) for item in sorted(scored_news, key=lambda x: x['score'], reverse=True) if not any(utils.seq_ratio(item['title'], un['title']) > 0.85 for un in unique_news)]
     news_items = unique_news[:config.MAX_NEWS_ITEMS]
     if not news_items: print("   -> No relevant news found. Cannot generate news video."); return
-
     print(f"\n✅ Top {len(news_items)} headlines selected:"); [print(f"   {i+1}. {item['title']} (Source: {item['source']})") for i, item in enumerate(news_items)]
     df, _ = data_fetcher.fetch_price_data(y_symbol); snap = data_fetcher.compute_price_snapshot(df)
     chart_size = (1200, 600) if video_format == 'landscape' else (680, 500)
     price_chart_path = chart_generator.make_candlestick_chart(df, nse_symbol, chart_size, theme)
-    
     slides = [{'type': 'intro', 'key': 'intro', 'text': f"{display}\nDaily Briefing", 'logo': True}]
     for i, item in enumerate(news_items): slides.append({'type': 'news', 'key': f'news_{i+1}', 'text': item['title'], 'icon': utils.classify_impact(item['title'])})
-    slides.append({'type': 'chart', 'key': 'market', 'path': price_chart_path}); slides.append({'type': 'cta', 'key': 'cta'})
-
-    # --- Pass 2: Resource Fetching & Rendering ---
+    slides.append({'type': 'chart', 'key': 'market', 'path': price_chart_path, 'blur_bg': True}); slides.append({'type': 'cta', 'key': 'cta'})
+    
+    # Pass 2: Resources & Rendering
     assets = fetch_pexels_bgs(len(slides), display, video_format)
     assets['logo'] = data_fetcher.fetch_company_logo(y_symbol)
     script_parts = content_creator.build_narration_news(display, news_items, snap)
@@ -49,33 +97,36 @@ def run_story_news(query, video_format, out_path, theme, icon_svg):
 def run_story_deepdive(query, video_format, out_path, theme, icon_svg):
     import data_fetcher, chart_generator, content_creator, video_renderer
     print("Running Story: Stock 101 Deep Dive")
-    # --- Pass 1: Content & Blueprint ---
+    # Pass 1: Content & Blueprint
     nse_symbol, y_symbol, display = data_fetcher.resolve_symbol(query)
-    profile = data_fetcher.fetch_company_profile(y_symbol); metrics = data_fetcher.fetch_financial_metrics(y_symbol); shareholding = data_fetcher.fetch_shareholding(nse_symbol); df, _ = data_fetcher.fetch_price_data(y_symbol)
+    details = data_fetcher.fetch_company_details(y_symbol); details['name'] = display
+    metrics = data_fetcher.fetch_financial_metrics(y_symbol); shareholding = data_fetcher.fetch_shareholding(nse_symbol); df, _ = data_fetcher.fetch_price_data(y_symbol)
     chart_size = (1200, 600) if video_format == 'landscape' else (680, 500)
     metrics_path = chart_generator.make_metrics_infographic(metrics, chart_size, theme) if metrics else None
     financials_path = chart_generator.make_financials_chart(y_symbol, chart_size, theme)
     shareholding_path = chart_generator.make_shareholding_chart(shareholding, chart_size, theme) if shareholding else None
     price_chart_path = chart_generator.make_candlestick_chart(df, nse_symbol, chart_size, theme)
     slides = [{'type': 'intro', 'key': 'intro', 'text': f"{display}\nStock Deep Dive", 'logo': True}]
-    if profile: slides.append({'type': 'summary', 'key': 'profile', 'text': profile})
-    if metrics_path: slides.append({'type': 'chart', 'key': 'metrics', 'path': metrics_path})
-    if financials_path: slides.append({'type': 'chart', 'key': 'financials', 'path': financials_path})
-    if shareholding_path: slides.append({'type': 'chart', 'key': 'shareholding', 'path': shareholding_path})
-    if price_chart_path: slides.append({'type': 'chart', 'key': 'market', 'path': price_chart_path})
+    if details.get("summary"): slides.append({'type': 'summary', 'key': 'profile', 'text': details['summary']})
+    if details.get("ceo"): slides.append({'type': 'summary', 'key': 'management', 'text': f"Led by:\n{details['ceo']}", 'is_title': True})
+    if details.get("sector"): slides.append({'type': 'summary', 'key': 'sector', 'text': f"Sector:\n{details['sector']}", 'is_title': True})
+    if metrics_path: slides.append({'type': 'chart', 'key': 'metrics', 'path': metrics_path, 'blur_bg': True})
+    if financials_path: slides.append({'type': 'chart', 'key': 'financials', 'path': financials_path, 'blur_bg': True})
+    if shareholding_path: slides.append({'type': 'chart', 'key': 'shareholding', 'path': shareholding_path, 'blur_bg': True})
+    if price_chart_path: slides.append({'type': 'chart', 'key': 'market', 'path': price_chart_path, 'blur_bg': True})
     slides.append({'type': 'cta', 'key': 'cta'})
-
-    # --- Pass 2: Resource Fetching & Rendering ---
+    
+    # Pass 2: Resources & Rendering
     assets = fetch_pexels_bgs(len(slides), display, video_format)
     assets['logo'] = data_fetcher.fetch_company_logo(y_symbol)
-    script_parts = content_creator.build_narration_deepdive(display, profile, metrics, shareholding)
+    script_parts = content_creator.build_narration_deepdive(details, metrics, shareholding)
     audio_paths = content_creator.generate_segmented_voiceover(script_parts)
     video_renderer.make_video(slides, audio_paths, display, nse_symbol, video_format, out_path, assets, theme, icon_svg)
 
 def run_story_comparison(query_a, query_b, video_format, out_path, theme, icon_svg):
     import data_fetcher, chart_generator, content_creator, video_renderer
     print("Running Story: Stock vs. Stock")
-    # --- Pass 1: Content & Blueprint ---
+    # Pass 1: Content & Blueprint
     print(f"\n--- Fetching data for Primary Stock: {query_a} ---"); nse_a, y_a, display_a = data_fetcher.resolve_symbol(query_a); metrics_a = data_fetcher.fetch_financial_metrics(y_a); df_a, _ = data_fetcher.fetch_price_data(y_a)
     print("\n--- Pausing briefly to respect API limits ---"); time.sleep(random.uniform(2, 4))
     print(f"\n--- Fetching data for Competitor Stock: {query_b} ---"); nse_b, y_b, display_b = data_fetcher.resolve_symbol(query_b); metrics_b = data_fetcher.fetch_financial_metrics(y_b); df_b, _ = data_fetcher.fetch_price_data(y_b)
@@ -86,12 +137,12 @@ def run_story_comparison(query_a, query_b, video_format, out_path, theme, icon_s
         mcap_chart_path = chart_generator.make_comparison_bar_chart("Market Cap (Cr)", metrics_a.get("Market Cap (Cr)"), metrics_b.get("Market Cap (Cr)"), display_a, display_b, chart_size, theme, out_png="outputs/tmp/mcap_comp.png")
     price_chart_path = chart_generator.make_stock_vs_stock_price_chart(df_a, df_b, display_a, display_b, chart_size, theme)
     slides = [{'type': 'intro', 'key': 'intro', 'text': f"{display_a}\nvs.\n{display_b}", 'logo': False}]
-    if pe_chart_path: slides.append({'type': 'chart', 'key': 'pe_compare', 'path': pe_chart_path})
-    if mcap_chart_path: slides.append({'type': 'chart', 'key': 'mcap_compare', 'path': mcap_chart_path})
-    if price_chart_path: slides.append({'type': 'chart', 'key': 'price_compare', 'path': price_chart_path})
+    if pe_chart_path: slides.append({'type': 'chart', 'key': 'pe_compare', 'path': pe_chart_path, 'blur_bg': True})
+    if mcap_chart_path: slides.append({'type': 'chart', 'key': 'mcap_compare', 'path': mcap_chart_path, 'blur_bg': True})
+    if price_chart_path: slides.append({'type': 'chart', 'key': 'price_compare', 'path': price_chart_path, 'blur_bg': True})
     slides.append({'type': 'cta', 'key': 'cta'})
-
-    # --- Pass 2: Resource Fetching & Rendering ---
+    
+    # Pass 2: Resources & Rendering
     assets = fetch_pexels_bgs(len(slides), display_a, video_format)
     script_parts = content_creator.build_narration_comparison(display_a, display_b, metrics_a, metrics_b)
     audio_paths = content_creator.generate_segmented_voiceover(script_parts)
@@ -100,59 +151,37 @@ def run_story_comparison(query_a, query_b, video_format, out_path, theme, icon_s
 def run_story_spotlight(query, video_format, out_path, theme, icon_svg):
     import data_fetcher, chart_generator, content_creator, video_renderer
     print("Running Story: Portfolio Spotlight")
-    # --- Pass 1: Content & Blueprint ---
-    nse_symbol, y_symbol, display = data_fetcher.resolve_symbol(query); metrics = data_fetcher.fetch_financial_metrics(y_symbol); shareholding = data_fetcher.fetch_shareholding(nse_symbol); peers = data_fetcher.fetch_peer_data(nse_symbol)
+    # Pass 1: Content & Blueprint
+    nse_symbol, y_symbol, display = data_fetcher.resolve_symbol(query); details = data_fetcher.fetch_company_details(y_symbol); details['name'] = display
+    metrics = data_fetcher.fetch_financial_metrics(y_symbol); shareholding = data_fetcher.fetch_shareholding(nse_symbol); peers = data_fetcher.fetch_peer_data(nse_symbol)
     print("\n--- Generating Spotlight Charts ---"); chart_size = (1200, 600) if video_format == 'landscape' else (680, 500)
     financials_path = chart_generator.make_financials_chart(y_symbol, chart_size, theme); valuation_path = None
     if metrics and "P/E Ratio" in metrics: valuation_path = chart_generator.make_single_metric_chart("P/E Ratio", metrics["P/E Ratio"], display, chart_size, theme)
     shareholding_path = chart_generator.make_shareholding_chart(shareholding, chart_size, theme) if shareholding else None
+    roe_path = chart_generator.make_single_metric_chart("Return on Equity", details.get("returnOnEquity"), display, chart_size, theme) if details.get("returnOnEquity") else None
     peer_chart_path = chart_generator.make_peer_comparison_chart(peers, display, chart_size, theme) if peers else None
+    
     slides = [{'type': 'intro', 'key': 'intro', 'text': f"{display}\nInvestor Spotlight", 'logo': True}]
-    if financials_path: slides.append({'type': 'chart', 'key': 'financials', 'path': financials_path})
-    if shareholding_path: slides.append({'type': 'chart', 'key': 'ownership', 'path': shareholding_path})
-    if valuation_path: slides.append({'type': 'chart', 'key': 'valuation', 'path': valuation_path})
-    if peer_chart_path: slides.append({'type': 'chart', 'key': 'peers', 'path': peer_chart_path})
+    slides.append({'type': 'summary', 'key': 'profitability_intro', 'text': "Lens 1:\nProfitability", 'is_title': True})
+    if financials_path: slides.append({'type': 'chart', 'key': 'financials', 'path': financials_path, 'blur_bg': True})
+    if roe_path: slides.append({'type': 'chart', 'key': 'roe', 'path': roe_path, 'blur_bg': True})
+    if shareholding_path:
+        slides.append({'type': 'summary', 'key': 'ownership_intro', 'text': "Lens 2:\nOwnership", 'is_title': True})
+        slides.append({'type': 'chart', 'key': 'ownership', 'path': shareholding_path, 'blur_bg': True})
+    if valuation_path or peer_chart_path:
+        slides.append({'type': 'summary', 'key': 'valuation_intro', 'text': "Lens 3:\nValuation", 'is_title': True})
+        if valuation_path: slides.append({'type': 'chart', 'key': 'valuation', 'path': valuation_path, 'blur_bg': True})
+        if peer_chart_path: slides.append({'type': 'chart', 'key': 'peers', 'path': peer_chart_path, 'blur_bg': True})
     slides.append({'type': 'summary', 'key': 'summary', 'text': "This analysis provides a structured way to evaluate a company, but is not financial advice."}); slides.append({'type': 'cta', 'key': 'cta'})
-
-    # --- Pass 2: Resource Fetching & Rendering ---
+    
+    # Pass 2: Resources & Rendering
     assets = fetch_pexels_bgs(len(slides), display, video_format)
     assets['logo'] = data_fetcher.fetch_company_logo(y_symbol)
-    script_parts = content_creator.build_narration_spotlight(display, metrics, shareholding, peers_exist=bool(peers))
+    dummy_audio_script = {"ownership_intro": ". . .", "valuation_intro": ". . .", "profitability_intro": ". . ."}
+    script_parts = content_creator.build_narration_spotlight(details, metrics, shareholding, peers_exist=bool(peers))
+    script_parts.update(dummy_audio_script)
     audio_paths = content_creator.generate_segmented_voiceover(script_parts)
     video_renderer.make_video(slides, audio_paths, display, nse_symbol, video_format, out_path, assets, theme, icon_svg)
-
-# --- PEXELS HELPER FUNCTION ---
-def fetch_pexels_bgs(num_bgs_needed, search_term, video_format):
-    assets = {}
-    if PEXELS_AVAILABLE and os.getenv("PEXELS_API_KEY"):
-        print(f"\n   -> Fetching {num_bgs_needed} background images from Pexels...")
-        try:
-            api = API(os.getenv("PEXELS_API_KEY"));
-            clean_search_term = search_term.split()[0]
-            search_queries = [f"{clean_search_term} abstract", "data visualization", "stock market", "business analytics"]; random.shuffle(search_queries)
-            is_portrait = (video_format == 'portrait'); bg_image_paths = []
-            found_urls = set()
-            for query in search_queries:
-                if len(bg_image_paths) >= num_bgs_needed: break
-                api.search(query, page=random.randint(1, 5), results_per_page=80)
-                for photo in api.get_entries():
-                    if len(bg_image_paths) >= num_bgs_needed: break
-                    if photo.url in found_urls: continue
-                    correct_orientation = (photo.height > photo.width) if is_portrait else (photo.width > photo.height)
-                    if not correct_orientation: continue
-                    if hasattr(photo, 'large2x'):
-                        img_url = photo.large2x; print(f"      - Downloading background: {os.path.basename(img_url)}")
-                        img_path = os.path.join(utils.get_script_dir(), "outputs", "tmp", f"bg_{len(bg_image_paths)}.jpg")
-                        response = utils.make_request_with_retries(img_url, timeout=60)
-                        if response:
-                            with open(img_path, 'wb') as f: f.write(response.content)
-                            try:
-                                Image.open(img_path).verify(); bg_image_paths.append(img_path); found_urls.add(photo.url)
-                            except (IOError, SyntaxError): print(f"      -  WARNING: Downloaded file {img_path} is corrupt. Skipping.")
-            assets['bg_images'] = bg_image_paths; assets['bg_credit'] = "Photos by Pexels" if bg_image_paths else None
-            if not bg_image_paths: print("      -  WARNING: Pexels search returned no suitable images after filtering.")
-        except Exception as e: print(f"      -  WARNING: Pexels API failed: {e}. Continuing with solid color backgrounds.")
-    return assets
 
 # --- MAIN ORCHESTRATOR ---
 def main_app():
@@ -187,14 +216,17 @@ def main_app():
             out_path = out_path or os.path.join(utils.get_script_dir(), "outputs", f"{args.queries[0]}_{args.type}_{args.format}.mp4")
             run_story_spotlight(args.queries[0], args.format, out_path, theme, icon_svg)
 
-        if out_path:
+        if out_path and os.path.exists(out_path):
             print("\n--- Independent File Verification ---")
-            if os.path.exists(out_path) and os.path.getsize(out_path) > 1024:
+            if os.path.getsize(out_path) > 1024:
                 print(f"✅✅✅ SUCCESS: Video created at '{out_path}' (Size: {os.path.getsize(out_path)/1024/1024:.2f} MB)")
             else:
-                print("❌❌❌ FAILURE: Output file not found or is empty. An error likely occurred during rendering.")
+                print("⚠️ WARNING: Output file is very small. It might be corrupt.")
+        else:
+            print("❌❌❌ FAILURE: Output file not found. An error likely occurred during rendering.")
+    
     except Exception as e:
-        print(f"\n❌ An error occurred in the main process: {e}")
+        print(f"\n❌ An error occurred during the main process setup: {e}")
         traceback.print_exc()
 
 if __name__ == "__main__":

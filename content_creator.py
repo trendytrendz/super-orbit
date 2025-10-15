@@ -12,19 +12,22 @@ def build_narration_news(company, news_items, price_info):
     for i, item in enumerate(news_items): script_parts[f"news_{i+1}"] = item['title'] + ". ..."
     return script_parts
 
-def build_narration_deepdive(company, profile, metrics, shareholding):
+def build_narration_deepdive(details, metrics, shareholding):
     print("  -> Building narration for 'Deep Dive' video.")
     script_parts = {}
-    script_parts["intro"] = f"What is the business behind {company}? Let's take a deep dive into its fundamentals in under 2 minutes. ..."
-    if profile: script_parts["profile"] = f"First, what do they do? {profile} ..."
-    market_cap = metrics.get("Market Cap (Cr)", "an unknown") if metrics else "an unknown"; pe_ratio = metrics.get("P/E Ratio", "unavailable") if metrics else "unavailable"
-    script_parts["metrics"] = f"To understand its scale, {company} has a market capitalization of {market_cap} crore rupees. Its Price to Earnings ratio is currently {pe_ratio}. ..."
-    script_parts["financials"] = f"A look at their financial performance shows a trend in revenue and net income over the past few years. This chart illustrates their recent financial health. ..."
+    company = details.get("name", "the company")
+    script_parts["intro"] = f"What is the business behind {company}? Let's do a complete deep dive into its business, management, financials, and market position. ..."
+    if details.get("summary"): script_parts["profile"] = f"First, what do they do? {details['summary']} ..."
+    if details.get("ceo"): script_parts["management"] = f"The company is led by {details['ceo']}. Strong leadership is a key factor in any business's success. ..."
+    if details.get("sector"): script_parts["sector"] = f"It operates in the {details['sector']} sector, specifically within the {details['industry']} industry. ..."
+    market_cap = metrics.get("Market Cap (Cr)", "an unknown") if metrics else "an unknown"
+    script_parts["metrics"] = f"Looking at the numbers, {company} has a market capitalization of {market_cap} crore rupees, which tells us its overall size in the market. ..."
+    script_parts["financials"] = f"Examining their financial performance, this chart shows the trend in revenue and net income over the past few years. ..."
     if shareholding and 'Promoter' in shareholding:
         promoter_holding = shareholding.get('Promoter', 0)
-        script_parts["shareholding"] = f"So, who owns the company? Promoters hold about {promoter_holding:.1f} percent of the shares. The rest is held by institutions and the public. ..."
-    script_parts["market"] = f"Finally, looking at the one-year price chart, we can see the stock's journey, providing context on its recent performance. ..."
-    script_parts["cta"] = "If you found this breakdown helpful, like this video and comment which company you want us to analyze next. Subscribe for more deep dives."
+        script_parts["shareholding"] = f"As for ownership, promoters hold about {promoter_holding:.1f} percent of the shares. The rest is held by various institutions and the public. ..."
+    script_parts["market"] = f"Finally, its one-year price chart shows the stock's journey, giving us context on its recent performance in the market. ..."
+    script_parts["cta"] = "If you found this complete breakdown helpful, like this video and subscribe for more deep dives. Comment which company you want to see next."
     return script_parts
 
 def build_narration_comparison(name_a, name_b, metrics_a, metrics_b):
@@ -39,19 +42,22 @@ def build_narration_comparison(name_a, name_b, metrics_a, metrics_b):
     script_parts["cta"] = f"Which company do you think is better? Let us know in the comments! Like and subscribe for more stock comparisons."
     return script_parts
 
-def build_narration_spotlight(company, metrics, shareholding, peers_exist):
+def build_narration_spotlight(details, metrics, shareholding, peers_exist):
     print("  -> Building narration for 'Portfolio Spotlight' video.")
     script_parts = {}
+    company = details.get("name", "the company")
     pe_ratio_val = metrics.get("P/E Ratio", "not available") if metrics else "not available"; promoter_holding = shareholding.get('Promoter', 0) if shareholding else 0
-    script_parts["intro"] = f"How would a value investor analyze {company}? Let's look at it through three key lenses: Profitability, Ownership, and Valuation. ..."
-    script_parts["financials"] = "First, profitability. Investors look for companies with consistent earnings. This chart of revenue and net income gives us a clue about the company's financial stability over time. ..."
-    if shareholding and promoter_holding > 10:
-        script_parts["ownership"] = f"Second, ownership. With promoters holding {promoter_holding:.1f} percent, it shows they have significant 'skin in the game,' which can align their interests with those of shareholders. ..."
-    script_parts["valuation"] = f"Third, valuation. The current Price to Earnings ratio is {pe_ratio_val}. This metric helps investors gauge if a stock is reasonably priced. ..."
+    roe_val = details.get("returnOnEquity", "unavailable")
+    script_parts["intro"] = f"How would a value investor like Warren Buffett analyze {company}? Let's use his framework to look at profitability, management, and valuation. ..."
+    script_parts["financials"] = "First, profitability. Buffett looks for companies with consistent and predictable earnings. This financial chart gives us a clue about the company's stability. ..."
+    script_parts["roe"] = f"A key metric for profitability is Return on Equity. For {company}, the ROE is {roe_val}. Investors often look for a consistent ROE above 15 percent. ..."
+    if shareholding and promoter_holding > 15:
+        script_parts["ownership"] = f"Second, management. With promoters holding {promoter_holding:.1f} percent, it shows strong 'skin in the game,' a trait that value investors appreciate. ..."
+    script_parts["valuation"] = f"Third, valuation. The current P/E ratio is {pe_ratio_val}. This helps an investor determine if the stock is trading at a reasonable price relative to its earnings. ..."
     if peers_exist:
-        script_parts["peers"] = f"But a P/E ratio is best seen with context. Here's how {company}'s valuation compares to some of its closest peers in the industry. ..."
-    script_parts["summary"] = "By examining profitability, ownership, and valuation in context, we can build a more complete picture of a company, much like a seasoned investor would. ..."
-    script_parts["cta"] = "Enjoyed this analysis? Like and subscribe for more investing case studies. Comment below with a stock you're curious about."
+        script_parts["peers"] = f"But valuation needs context. Here is how {company}'s P/E ratio stacks up against its industry peers. ..."
+    script_parts["summary"] = "By analyzing these key areas, investors can build a fundamental thesis about a company before investing. ..."
+    script_parts["cta"] = "If you enjoy this style of analysis, like this video and subscribe for more investor case studies."
     return script_parts
 
 def _generate_single_audio(script, output_path):
