@@ -15,12 +15,11 @@ try:
     PEXELS_AVAILABLE = True
 except ImportError:
     PEXELS_AVAILABLE = False
-
+git s
 # --- PEXELS HELPER FUNCTION ---
 def fetch_pexels_bgs(num_bgs_needed, search_term, video_format):
     assets = {}
-    if not (PEXELS_AVAILABLE and os.getenv("PEXELS_API_KEY")):
-        return assets
+    if not (PEXELS_AVAILABLE and os.getenv("PEXELS_API_KEY")): return assets
     print(f"\n   -> Fetching {num_bgs_needed} background images from Pexels...")
     try:
         api = API(os.getenv("PEXELS_API_KEY")); clean_search_term = search_term.split()[0]
@@ -59,23 +58,21 @@ def run_story_news(query, video_format, out_path, theme, icon_svg):
     if not news_items: print("   -> No relevant news found. Cannot generate news video."); return
     print(f"\n✅ Top {len(news_items)} headlines selected:"); [print(f"   {i+1}. {item['title']} (Source: {item['source']})") for i, item in enumerate(news_items)]
     df, _ = data_fetcher.fetch_price_data(y_symbol); snap = data_fetcher.compute_price_snapshot(df)
-    script_parts = content_creator.build_narration_news(display, news_items, snap)
-    audio_paths = content_creator.generate_segmented_voiceover(script_parts)
     chart_size = (1200, 600) if video_format == 'landscape' else (680, 500)
     price_chart_path = chart_generator.make_candlestick_chart(df, nse_symbol, chart_size, theme)
     slides = [{'type': 'intro', 'key': 'intro', 'text': f"{display}\nDaily Briefing", 'logo': True}]
     for i, item in enumerate(news_items): slides.append({'type': 'news', 'key': f'news_{i+1}', 'text': item['title'], 'icon': utils.classify_impact(item['title'])})
     slides.append({'type': 'chart', 'key': 'market', 'path': price_chart_path, 'blur_bg': True}); slides.append({'type': 'cta', 'key': 'cta'})
-    assets = fetch_pexels_bgs(len(slides), display, video_format)
-    assets['logo'] = data_fetcher.fetch_company_logo(y_symbol)
+    assets = fetch_pexels_bgs(len(slides), display, video_format); assets['logo'] = data_fetcher.fetch_company_logo(y_symbol)
+    script_parts = content_creator.build_narration_news(display, news_items, snap)
+    audio_paths = content_creator.generate_segmented_voiceover(script_parts)
     video_renderer.make_video(slides, audio_paths, display, nse_symbol, video_format, out_path, assets, theme, icon_svg)
 
 def run_story_deepdive(query, video_format, out_path, theme, icon_svg):
     import data_fetcher, chart_generator, content_creator, video_renderer
     print("Running Story: Stock 101 Deep Dive")
     nse_symbol, y_symbol, display = data_fetcher.resolve_symbol(query)
-    tt_data = data_fetcher.fetch_tickertape_data(nse_symbol)
-    yfinance_details = data_fetcher.fetch_yfinance_supplemental_details(y_symbol)
+    tt_data = data_fetcher.fetch_tickertape_data(nse_symbol); yfinance_details = data_fetcher.fetch_yfinance_supplemental_details(y_symbol)
     df, _ = data_fetcher.fetch_price_data(y_symbol)
     all_metrics = {**tt_data['metrics'], **{k: v for k, v in yfinance_details.items() if k in ['52-Wk High', '52-Wk Low']}}
     details = {'name': display, 'summary': tt_data['profile'], 'ceo': yfinance_details['ceo'], 'peers': list(tt_data['peers'].keys()) if tt_data['peers'] else []}
@@ -95,8 +92,7 @@ def run_story_deepdive(query, video_format, out_path, theme, icon_svg):
     if shareholding_path: slides.append({'type': 'chart', 'key': 'shareholding', 'path': shareholding_path, 'blur_bg': True})
     if price_chart_path: slides.append({'type': 'chart', 'key': 'market', 'path': price_chart_path, 'blur_bg': True})
     slides.append({'type': 'cta', 'key': 'cta'})
-    assets = fetch_pexels_bgs(len(slides), display, video_format)
-    assets['logo'] = data_fetcher.fetch_company_logo(y_symbol)
+    assets = fetch_pexels_bgs(len(slides), display, video_format); assets['logo'] = data_fetcher.fetch_company_logo(y_symbol)
     script_parts = content_creator.build_narration_deepdive(details, all_metrics, tt_data['shareholding'], peers_exist=bool(details.get("peers")))
     audio_paths = content_creator.generate_segmented_voiceover(script_parts)
     video_renderer.make_video(slides, audio_paths, display, nse_symbol, video_format, out_path, assets, theme, icon_svg)
@@ -124,8 +120,7 @@ def run_story_comparison(query_a, query_b, video_format, out_path, theme, icon_s
 def run_story_spotlight(query, video_format, out_path, theme, icon_svg):
     import data_fetcher, chart_generator, content_creator, video_renderer
     print("Running Story: Portfolio Spotlight")
-    nse_symbol, y_symbol, display = data_fetcher.resolve_symbol(query)
-    tt_data = data_fetcher.fetch_tickertape_data(nse_symbol); yfinance_details = data_fetcher.fetch_yfinance_supplemental_details(y_symbol)
+    nse_symbol, y_symbol, display = data_fetcher.resolve_symbol(query); tt_data = data_fetcher.fetch_tickertape_data(nse_symbol); yfinance_details = data_fetcher.fetch_yfinance_supplemental_details(y_symbol)
     narration_details = {'name': display, **yfinance_details}
     print("\n--- Generating Spotlight Charts ---"); chart_size = (1200, 600) if video_format == 'landscape' else (680, 500)
     financials_path = chart_generator.make_financials_chart(y_symbol, chart_size, theme)
@@ -147,9 +142,8 @@ def run_story_spotlight(query, video_format, out_path, theme, icon_svg):
     slides.append({'type': 'summary', 'key': 'summary', 'text': "This analysis provides a structured way to evaluate a company, but is not financial advice."}); slides.append({'type': 'cta', 'key': 'cta'})
     assets = fetch_pexels_bgs(len(slides), display, video_format)
     assets['logo'] = data_fetcher.fetch_company_logo(y_symbol)
-    dummy_audio_script = {"ownership_intro": ". . .", "valuation_intro": ". . .", "profitability_intro": ". . ."}
+    # CRITICAL FIX: DO NOT generate dummy audio. The renderer will handle it.
     script_parts = content_creator.build_narration_spotlight(narration_details, tt_data['metrics'], tt_data['shareholding'], peers_exist=bool(tt_data['peers']))
-    script_parts.update(dummy_audio_script)
     audio_paths = content_creator.generate_segmented_voiceover(script_parts)
     video_renderer.make_video(slides, audio_paths, display, nse_symbol, video_format, out_path, assets, theme, icon_svg)
 
@@ -160,56 +154,34 @@ def main_app():
     parser.add_argument("--format", choices=['landscape', 'portrait'], default='portrait', help="Video format.")
     parser.add_argument("--out", help="Output MP4 path")
     args = parser.parse_args()
-
     utils.ensure_dirs()
-    theme = random.choice(config.BASE_THEMES)
-    theme['font'] = random.choice(config.FONT_PATHS) if config.FONT_PATHS else None
+    theme = random.choice(config.BASE_THEMES); theme['font'] = random.choice(config.FONT_PATHS) if config.FONT_PATHS else None
     if not theme['font']: raise IOError("No valid font files found.")
-    
-    # *** CRITICAL FIX: RESTORED FULL SVG STRINGS ***
-    icon_svg = {
-        "positive": f'<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 -960 960 960" width="48"><path fill="{theme["accent"]}" d="m280-400 200-200 200 200H280Z"/></svg>',
-        "negative": f'<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 -960 960 960" width="48"><path fill="#F44336" d="M480-560 280-760h400L480-560Z"/></svg>',
-        "uncertain": f'<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 -960 960 960" width="48"><path fill="#9E9E9E" d="M200-450h560v-60H200v60Z"/></svg>'
-    }
-
+    icon_svg = { "positive": f'<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 -960 960 960" width="48"><path fill="{theme["accent"]}" d="m280-400 200-200 200 200H280Z"/></svg>', "negative": f'<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 -960 960 960" width="48"><path fill="#F44336" d="M480-560 280-760h400L480-560Z"/></svg>', "uncertain": f'<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 -960 960 960" width="48"><path fill="#9E9E9E" d="M200-450h560v-60H200v60Z"/></svg>' }
     try:
         out_path = args.out
-        story_map = {
-            'news': (run_story_news, 1), 
-            'deepdive': (run_story_deepdive, 1), 
-            'comparison': (run_story_comparison, 2), 
-            'spotlight': (run_story_spotlight, 1)
-        }
-        
-        story_func, num_queries = story_map.get(args.type)
+        story_map = {'news': run_story_news, 'deepdive': run_story_deepdive, 'comparison': run_story_comparison, 'spotlight': run_story_spotlight}
+        query_map = {'news': 1, 'deepdive': 1, 'comparison': 2, 'spotlight': 1}
+        story_func = story_map.get(args.type)
+        num_queries = query_map.get(args.type)
         if len(args.queries) != num_queries:
             parser.error(f"'{args.type}' type requires exactly {num_queries} quer{'y' if num_queries == 1 else 'ies'}.")
-
         if args.type == 'comparison':
             out_path = out_path or os.path.join(utils.get_script_dir(), "outputs", f"{args.queries[0]}_vs_{args.queries[1]}_{args.type}_{args.format}.mp4")
             story_func(args.queries[0], args.queries[1], args.format, out_path, theme, icon_svg)
         else:
             out_path = out_path or os.path.join(utils.get_script_dir(), "outputs", f"{args.queries[0]}_{args.type}_{args.format}.mp4")
             story_func(args.queries[0], args.format, out_path, theme, icon_svg)
-
         if out_path and os.path.exists(out_path):
             print("\n--- Independent File Verification ---")
-            if os.path.getsize(out_path) > 1024:
-                print(f"✅✅✅ SUCCESS: Video created at '{out_path}' (Size: {os.path.getsize(out_path)/1024/1024:.2f} MB)")
-            else:
-                print("⚠️ WARNING: Output file is very small. It might be corrupt.")
+            if os.path.getsize(out_path) > 1024: print(f"✅✅✅ SUCCESS: Video created at '{out_path}' (Size: {os.path.getsize(out_path)/1024/1024:.2f} MB)")
+            else: print("⚠️ WARNING: Output file is very small. It might be corrupt.")
         elif args.type in story_map:
             print("❌❌❌ FAILURE: Output file not found. An error likely occurred during rendering.")
-    
     except Exception as e:
-        print(f"\n❌ An error occurred during the main process setup: {e}")
-        traceback.print_exc()
+        print(f"\n❌ An error occurred during the main process setup: {e}"); traceback.print_exc()
 
 if __name__ == "__main__":
-    try:
-        multiprocessing.set_start_method("spawn", force=True)
-    except RuntimeError:
-        pass
-    
+    try: multiprocessing.set_start_method("spawn", force=True)
+    except RuntimeError: pass
     main_app()
