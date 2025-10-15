@@ -16,6 +16,7 @@ import config
 import utils
 import content_creator
 
+# --- Helper Functions ---
 def create_chart_slide_image(chart_path, size):
     fg_img = Image.new("RGBA", size, (0,0,0,0));
     with Image.open(chart_path) as chart_img_file:
@@ -71,6 +72,7 @@ def create_pan_zoom_clip(duration, bg_path, size):
     except Exception as e:
         print(f"  - Warning: Could not create pan/zoom BG, using static color. Error: {e}"); return ColorClip(size=size, color=bg_color_tuple, duration=duration)
 
+# --- Main Video Rendering Function ---
 def make_video(slides, audio_paths, company, nse_symbol, video_format, out_path, assets, theme, icon_svg):
     VIDEO_W, VIDEO_H = (config.VIDEO_W_LANDSCAPE, config.VIDEO_H_LANDSCAPE) if video_format == 'landscape' else (config.VIDEO_W_PORTRAIT, config.VIDEO_H_PORTRAIT)
     font_path = theme['font']; bg_images = assets.get('bg_images', [])
@@ -88,8 +90,7 @@ def make_video(slides, audio_paths, company, nse_symbol, video_format, out_path,
             print(f"    - No audio for '{key}'. Creating a silent title slide.")
             duration = config.TITLE_SLIDE_DURATION; audio_clip = AudioClip(lambda t: [0, 0], duration=duration, fps=44100)
         if duration <= 0:
-            if audio_clip: audio_clip.close();
-            continue
+            if audio_clip: audio_clip.close(); continue
         audio_clips_timeline.append(audio_clip.set_start(current_time))
         bg_clip_raw = create_pan_zoom_clip(duration, bg_images[bg_idx % len(bg_images)] if bg_images else None, (VIDEO_W, VIDEO_H))
         bg_clip = bg_clip_raw.fl_image(lambda frame: gaussian_filter(frame, sigma=15)) if slide_info.get('blur_bg', False) else bg_clip_raw
@@ -123,6 +124,7 @@ def make_video(slides, audio_paths, company, nse_symbol, video_format, out_path,
         else:
             if audio_clip: audio_clip.close()
     if not slide_clips: print("❌ ERROR: No slides were generated. Aborting video creation."); return
+
     total_dur = current_time; narration_audio = CompositeAudioClip(audio_clips_timeline)
     try:
         music_dir = os.path.join(utils.get_script_dir(), 'music'); music_files = [f for f in os.listdir(music_dir) if f.endswith('.mp3')] if os.path.exists(music_dir) else []
@@ -141,8 +143,10 @@ def make_video(slides, audio_paths, company, nse_symbol, video_format, out_path,
     else: subtitles_data = None
     composited_elements = [video]
     if subtitles_data:
-        def subtitle_generator(txt): return TextClip(txt, font=font_path, fontsize=38, color='white', stroke_color='#000000CC', stroke_width=2.5, align='center', method='caption')
-        subtitle_clip = SubtitlesClip(subtitles_data, subtitle_generator).set_position(('center', 0.88), relative=True); composited_elements.append(subtitle_clip)
+        def subtitle_generator(txt):
+            wrapped_text = utils.wrap_text_for_subtitles(txt, max_chars_per_line=35)
+            return TextClip(wrapped_text, font=font_path, fontsize=38, color='yellow', bg_color='rgba(0, 0, 0, 0.6)', align='center', method='caption')
+        subtitle_clip = SubtitlesClip(subtitles_data, subtitle_generator).set_position(('center', 0.85), relative=True); composited_elements.append(subtitle_clip)
     footer_clip = TextClip("Sources: Multiple. Not financial advice.", font=font_path, fontsize=20, color='gray').set_position(('center', VIDEO_H * 0.95)); composited_elements.append(footer_clip)
     if assets.get('bg_credit'):
         credit_clip = TextClip(assets['bg_credit'], font=font_path, fontsize=16, color='gray').set_position((10, VIDEO_H - 30)); composited_elements.append(credit_clip)

@@ -1,9 +1,8 @@
 # config.py
 import os
 
-
 # Version
-__version__ = "11.0.6"
+__version__ = "13.1.8"
 
 # Video Dimensions & Timings
 VIDEO_W_LANDSCAPE, VIDEO_H_LANDSCAPE = 1280, 720

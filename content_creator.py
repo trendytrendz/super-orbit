@@ -12,14 +12,14 @@ def build_narration_news(company, news_items, price_info):
     for i, item in enumerate(news_items): script_parts[f"news_{i+1}"] = item['title'] + ". ..."
     return script_parts
 
-def build_narration_deepdive(details, metrics, shareholding):
+def build_narration_deepdive(details, metrics, shareholding, peers_exist):
     print("  -> Building narration for 'Deep Dive' video.")
     script_parts = {}
     company = details.get("name", "the company")
-    script_parts["intro"] = f"What is the business behind {company}? Let's do a complete deep dive into its business, management, financials, and market position. ..."
+    script_parts["intro"] = f"What is {company}? Let's do a complete deep dive into its business, management, financials, and market position. ..."
     if details.get("summary"): script_parts["profile"] = f"First, what do they do? {details['summary']} ..."
     if details.get("ceo"): script_parts["management"] = f"The company is led by {details['ceo']}. Strong leadership is a key factor in any business's success. ..."
-    if details.get("sector"): script_parts["sector"] = f"It operates in the {details['sector']} sector, specifically within the {details['industry']} industry. ..."
+    if peers_exist: script_parts["competitors"] = f"In the competitive landscape, its main rivals include some of the top names in the industry. ..."
     market_cap = metrics.get("Market Cap (Cr)", "an unknown") if metrics else "an unknown"
     script_parts["metrics"] = f"Looking at the numbers, {company} has a market capitalization of {market_cap} crore rupees, which tells us its overall size in the market. ..."
     script_parts["financials"] = f"Examining their financial performance, this chart shows the trend in revenue and net income over the past few years. ..."
@@ -49,7 +49,7 @@ def build_narration_spotlight(details, metrics, shareholding, peers_exist):
     pe_ratio_val = metrics.get("P/E Ratio", "not available") if metrics else "not available"; promoter_holding = shareholding.get('Promoter', 0) if shareholding else 0
     roe_val = details.get("returnOnEquity", "unavailable")
     script_parts["intro"] = f"How would a value investor like Warren Buffett analyze {company}? Let's use his framework to look at profitability, management, and valuation. ..."
-    script_parts["financials"] = "First, profitability. Buffett looks for companies with consistent and predictable earnings. This financial chart gives us a clue about the company's stability. ..."
+    script_parts["financials"] = "First, profitability. Buffett looks for companies with consistent and predictable earnings. This financial chart gives us a clue about the company's financial stability over time. ..."
     script_parts["roe"] = f"A key metric for profitability is Return on Equity. For {company}, the ROE is {roe_val}. Investors often look for a consistent ROE above 15 percent. ..."
     if shareholding and promoter_holding > 15:
         script_parts["ownership"] = f"Second, management. With promoters holding {promoter_holding:.1f} percent, it shows strong 'skin in the game,' a trait that value investors appreciate. ..."
