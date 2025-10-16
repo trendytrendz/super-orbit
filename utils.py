@@ -2,6 +2,7 @@
 import os
 import time
 import requests
+import json
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from PIL import Image, ImageDraw, ImageFont
@@ -14,6 +15,37 @@ except ImportError:
     FAKE_USERAGENT_AVAILABLE = False
 
 import config
+
+def query_local_llm(prompt):
+    """Sends a prompt to the local Ollama server and gets a response."""
+    print("   -> Querying local LLM for insights...")
+    try:
+        url = "http://localhost:11434/api/generate"
+        payload = {
+            "model": "llama3:8b",
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.3
+            }
+        }
+        response = requests.post(url, json=payload, timeout=90)
+        response.raise_for_status()
+        
+        response_json = response.json()
+        analysis = response_json.get("response", "").strip().replace('"', '')
+
+        if "Here is a concise narration" in analysis:
+            analysis = analysis.split(":\n", 1)[-1].strip()
+        if analysis.startswith("This means"):
+            analysis = "This means " + analysis.split("This means", 1)[-1].strip()
+
+        print("      - LLM analysis received.")
+        return analysis
+
+    except requests.exceptions.RequestException as e:
+        print(f"      - WARNING: Could not connect to local LLM. Is Ollama running? Error: {e}")
+        return None
 
 def get_script_dir():
     return os.path.dirname(os.path.realpath(__file__))
@@ -36,12 +68,7 @@ def classify_impact(text):
     if any(k in t for k in config.NEGATIVE_CUES): return "negative"
     return "uncertain"
 
-# *** START: UPGRADED HEADER FUNCTION ***
 def get_browser_headers(url=""):
-    """
-    Returns a dictionary of headers to mimic a real browser request.
-    Crucially, adds the 'x-tickertape-div' header for TickerTape API calls.
-    """
     base_headers = {
         "Accept": "application/json, text/plain, */*",
         "Accept-Encoding": "gzip, deflate, br",
@@ -57,18 +84,12 @@ def get_browser_headers(url=""):
     }
     if FAKE_USERAGENT_AVAILABLE:
         base_headers['User-Agent'] = UserAgent().random
-        
-    # Add the special header only for TickerTape requests
     if "tickertape.in" in urlparse(url).netloc:
         base_headers['x-tickertape-div'] = "7df92dc3-b097-421b-8c28-724d265a7098"
-    
     return base_headers
-# *** END: UPGRADED HEADER FUNCTION ***
 
 def make_request_with_retries(url, headers=None, timeout=45, retries=3, delay=5):
-    # Use robust browser headers by default, dynamically generated for the URL
     request_headers = headers if headers is not None else get_browser_headers(url)
-    
     for attempt in range(retries):
         try:
             response = requests.get(url, headers=request_headers, timeout=timeout)

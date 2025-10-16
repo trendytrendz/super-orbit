@@ -19,7 +19,8 @@ except ImportError:
 # --- PEXELS HELPER FUNCTION ---
 def fetch_pexels_bgs(num_bgs_needed, search_term, video_format):
     assets = {}
-    if not (PEXELS_AVAILABLE and os.getenv("PEXELS_API_KEY")): return assets
+    if not (PEXELS_AVAILABLE and os.getenv("PEXELS_API_KEY")):
+        return assets
     print(f"\n   -> Fetching {num_bgs_needed} background images from Pexels...")
     try:
         api = API(os.getenv("PEXELS_API_KEY")); clean_search_term = search_term.split()[0]
@@ -57,22 +58,36 @@ def run_story_news(query, video_format, out_path, theme, icon_svg):
     news_items = unique_news[:config.MAX_NEWS_ITEMS]
     if not news_items: print("   -> No relevant news found. Cannot generate news video."); return
     print(f"\n✅ Top {len(news_items)} headlines selected:"); [print(f"   {i+1}. {item['title']} (Source: {item['source']})") for i, item in enumerate(news_items)]
+    llm_narrations = {}
+    print("\n--- Generating News Analysis with Local LLM ---")
+    for i, item in enumerate(news_items):
+        prompt = f"""You are a financial analyst creating a script for a short video. Your tone is simple, informative, and neutral. Given the following news headline for the company '{display}': "{item['title']}"
+        1. Briefly explain what this headline means in simple terms.
+        2. Explain the potential positive impact OR potential negative impact this could have on the company.
+        3. Generate a concise, 2-3 sentence narration for a video script based on this analysis. Do not give financial advice. Do not repeat the headline.
+        Your narration:"""
+        analysis = utils.query_local_llm(prompt)
+        if analysis:
+            print(f"      - LLM Analysis for News {i+1}: {analysis}")
+            llm_narrations[f"news_{i+1}"] = analysis
     df, _ = data_fetcher.fetch_price_data(y_symbol); snap = data_fetcher.compute_price_snapshot(df)
+    script_parts = content_creator.build_narration_news(display, news_items, snap)
+    if llm_narrations: script_parts.update(llm_narrations); print("   -> Successfully replaced headlines with LLM-generated analysis.")
+    audio_paths = content_creator.generate_segmented_voiceover(script_parts)
     chart_size = (1200, 600) if video_format == 'landscape' else (680, 500)
     price_chart_path = chart_generator.make_candlestick_chart(df, nse_symbol, chart_size, theme)
     slides = [{'type': 'intro', 'key': 'intro', 'text': f"{display}\nDaily Briefing", 'logo': True}]
     for i, item in enumerate(news_items): slides.append({'type': 'news', 'key': f'news_{i+1}', 'text': item['title'], 'icon': utils.classify_impact(item['title'])})
     slides.append({'type': 'chart', 'key': 'market', 'path': price_chart_path, 'blur_bg': True}); slides.append({'type': 'cta', 'key': 'cta'})
     assets = fetch_pexels_bgs(len(slides), display, video_format); assets['logo'] = data_fetcher.fetch_company_logo(y_symbol)
-    script_parts = content_creator.build_narration_news(display, news_items, snap)
-    audio_paths = content_creator.generate_segmented_voiceover(script_parts)
     video_renderer.make_video(slides, audio_paths, display, nse_symbol, video_format, out_path, assets, theme, icon_svg)
 
 def run_story_deepdive(query, video_format, out_path, theme, icon_svg):
     import data_fetcher, chart_generator, content_creator, video_renderer
     print("Running Story: Stock 101 Deep Dive")
     nse_symbol, y_symbol, display = data_fetcher.resolve_symbol(query)
-    tt_data = data_fetcher.fetch_tickertape_data(nse_symbol); yfinance_details = data_fetcher.fetch_yfinance_supplemental_details(y_symbol)
+    tt_data = data_fetcher.fetch_tickertape_data(nse_symbol)
+    yfinance_details = data_fetcher.fetch_yfinance_supplemental_details(y_symbol)
     df, _ = data_fetcher.fetch_price_data(y_symbol)
     all_metrics = {**tt_data['metrics'], **{k: v for k, v in yfinance_details.items() if k in ['52-Wk High', '52-Wk Low']}}
     details = {'name': display, 'summary': tt_data['profile'], 'ceo': yfinance_details['ceo'], 'peers': list(tt_data['peers'].keys()) if tt_data['peers'] else []}
@@ -142,8 +157,9 @@ def run_story_spotlight(query, video_format, out_path, theme, icon_svg):
     slides.append({'type': 'summary', 'key': 'summary', 'text': "This analysis provides a structured way to evaluate a company, but is not financial advice."}); slides.append({'type': 'cta', 'key': 'cta'})
     assets = fetch_pexels_bgs(len(slides), display, video_format)
     assets['logo'] = data_fetcher.fetch_company_logo(y_symbol)
-    # CRITICAL FIX: DO NOT generate dummy audio. The renderer will handle it.
+    dummy_audio_script = {"ownership_intro": ". . .", "valuation_intro": ". . .", "profitability_intro": ". . ."}
     script_parts = content_creator.build_narration_spotlight(narration_details, tt_data['metrics'], tt_data['shareholding'], peers_exist=bool(tt_data['peers']))
+    script_parts.update(dummy_audio_script)
     audio_paths = content_creator.generate_segmented_voiceover(script_parts)
     video_renderer.make_video(slides, audio_paths, display, nse_symbol, video_format, out_path, assets, theme, icon_svg)
 
@@ -157,7 +173,16 @@ def main_app():
     utils.ensure_dirs()
     theme = random.choice(config.BASE_THEMES); theme['font'] = random.choice(config.FONT_PATHS) if config.FONT_PATHS else None
     if not theme['font']: raise IOError("No valid font files found.")
-    icon_svg = { "positive": f'<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 -960 960 960" width="48"><path fill="{theme["accent"]}" d="m280-400 200-200 200 200H280Z"/></svg>', "negative": f'<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 -960 960 960" width="48"><path fill="#F44336" d="M480-560 280-760h400L480-560Z"/></svg>', "uncertain": f'<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 -960 960 960" width="48"><path fill="#9E9E9E" d="M200-450h560v-60H200v60Z"/></svg>' }
+    
+    icon_svg = {
+        "positive": f'<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 -960 960 960" width="48"><path fill="{theme["accent"]}" d="m280-400 200-200 200 200H280Z"/></svg>',
+        "negative": f'<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 -960 960 960" width="48"><path fill="#F44336" d="M480-560 280-760h400L480-560Z"/></svg>',
+        "uncertain": f'<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 -960 960 960" width="48"><path fill="#9E9E9E" d="M200-450h560v-60H200v60Z"/></svg>',
+        "like": f'<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 -960 960 960" width="48"><path fill="{theme["accent"]}" d="M720-120H280v-520l280-280 50 50q7 7 11.5 19t4.5 23v14l-44 214h258q32 0 56 24t24 56v80q0 7-2 15t-4 15L794-168q-9 20-30 34t-44 14Zm-360-80h360l120-280v-80H480l54-260-174 174v446Zm0 80Z"/></svg>',
+        "comment": '<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 -960 960 960" width="48"><path fill="#FFFFFF" d="M240-400h480v-80H240v80Zm0-120h480v-80H240v80Zm0-120h480v-80H240v80ZM80-80v-720q0-33 23.5-56.5T160-880h640q33 0 56.5 23.5T880-800v480q0 33-23.5 56.5T800-240H240L80-80Zm80-200h640v-480H160v525l40-45Z"/></svg>',
+        "share": '<svg xmlns="http://www.w3.org/2000/svg" height="48" viewBox="0 -960 960 960" width="48"><path fill="#FFFFFF" d="M720-80q-50 0-85-35t-35-85q0-7 1-14.5t3-13.5L322-382q-18 13-40 21t-42 8q-50 0-85-35t-35-85q0-50 35-85t85-35q20 0 40 7.5t38 20.5l282-164q-2-6-2.5-12.5T600-720q0-50 35-85t85-35q50 0 85 35t35 85q0 50-35 85t-85 35q-20 0-38-7.5t-40-20.5L340-542q2 6 2.5 12.5t.5 13.5q0 7-1 14t-3 14l282 164q18-13 40-21t42-8q50 0 85 35t35 85q0 50-35 85t-85 35Zm0-640q17 0 28.5-11.5T760-760q0-17-11.5-28.5T720-800q-17 0-28.5 11.5T680-760q0-17 11.5 28.5T720-720ZM240-440q17 0 28.5-11.5T280-480q0-17-11.5-28.5T240-520q-17 0-28.5 11.5T200-480q0-17 11.5 28.5T240-440Zm480 280q17 0 28.5-11.5T760-200q0-17-11.5-28.5T720-240q-17 0-28.5 11.5T680-200q0-17 11.5 28.5T720-160Z"/></svg>'
+    }
+
     try:
         out_path = args.out
         story_map = {'news': run_story_news, 'deepdive': run_story_deepdive, 'comparison': run_story_comparison, 'spotlight': run_story_spotlight}

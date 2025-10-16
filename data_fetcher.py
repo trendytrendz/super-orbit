@@ -84,16 +84,67 @@ def resolve_symbol_from_nse_local(query, file_path='nse_symbols.csv'):
         return best_match if highest_score > 0.6 else None
     except Exception as e: print(f"      - Error during fuzzy search on local NSE list: {e}"); return None
 
-def score_news_relevance(headline, company_name, source):
-    score = 0
-    headline_lower = headline.lower()
-    company_name_short = company_name.split()[0].lower()
-    if headline_lower.startswith(company_name_short): score += 30
-    elif company_name_short in headline_lower: score += 10
-    for keyword in config.IMPACT_KEYWORDS:
-        if keyword in headline_lower: score += 15
-    score += config.SOURCE_BONUS.get(source, 0)
-    return score
+def fetch_tickertape_data(nse_symbol):
+    print("  -> Fetching consolidated data from TickerTape API...")
+    bundle = { "shareholding": None, "metrics": {}, "peers": None, "profile": None, "sector": None }
+    try:
+        print("      - Step 1: Searching for stock's internal ID (sid)...")
+        search_url = f"https://api.tickertape.in/search?text={nse_symbol}&types=stock"
+        search_res = make_request_with_retries(search_url); search_data = search_res.json()
+        stock = next((s for s in search_data.get('data', {}).get('stocks', []) if s.get('ticker') == nse_symbol), None)
+        if not (stock and stock.get('sid')):
+            print(f"      - WARNING: Could not find a matching stock with a 'sid' for {nse_symbol} via search. Skipping TickerTape.")
+            return bundle
+        sid = stock['sid']; print(f"      - Found internal ID (sid): {sid}")
+        print(f"      - Step 2: Fetching data using sid '{sid}'...")
+        api_url = f"https://api.tickertape.in/stocks/info/{sid}"
+        api_res = make_request_with_retries(api_url); api_data = api_res.json()
+        if not api_data.get("success", False): print("      - WARNING: TickerTape API reported failure."); return bundle
+        tt_data = api_data.get("data", {})
+        if holding_data := tt_data.get("holding", {}).get("data"):
+            h_map = {"prom": "Promoter", "mf": "Mutual Funds", "dii": "Other Dom. Inst.", "fii": "Foreign Inst.", "ret": "Retail & Others"}
+            sh = {h_map.get(i.get("type")): float(i.get("value")) for i in holding_data if i.get("type") in h_map and i.get("value") is not None}
+            bundle["shareholding"] = {k: v for k, v in sh.items() if v > 0}; print("      - Parsed shareholding data.")
+        if ratios := tt_data.get("ratios", {}):
+            if r := ratios.get("mcap"): bundle["metrics"]["Market Cap (Cr)"] = f"{r / 1e7:,.2f}"
+            if r := ratios.get("pe"): bundle["metrics"]["P/E Ratio"] = f"{r:.2f}"
+            if r := ratios.get("pb"): bundle["metrics"]["P/B Ratio"] = f"{r:.2f}"
+            if r := ratios.get("dy"): bundle["metrics"]["Dividend Yield (%)"] = f"{r:.2f}"
+            print("      - Parsed key metrics.")
+        if sector_info := tt_data.get("sector"): bundle["sector"] = sector_info.get("sector"); print("      - Successfully parsed sector info.")
+        if peers := tt_data.get("peers"):
+            bundle["peers"] = {p.get("info", {}).get("ticker"): p.get("ratios", {}).get("pe") for p in peers[:4] if p.get("ratios", {}).get("pe")}; print("      - Parsed peer data.")
+        if desc := tt_data.get("profile", {}).get("description"):
+            summary = desc.split('.')[0] + '.'; bundle["profile"] = summary[:400].rsplit(' ', 1)[0] + '...' if len(summary) > 400 else summary; print("      - Parsed company profile.")
+    except Exception as e:
+        print(f"      - WARNING: An error occurred fetching from TickerTape API: {e}. Some data may be missing.")
+    return bundle
+
+def fetch_yfinance_supplemental_details(y_symbol):
+    print("  -> Fetching supplemental details (CEO, ROE) from yfinance...")
+    details = {"ceo": None, "returnOnEquity": None, "52-Wk High": None, "52-Wk Low": None}
+    try:
+        ticker = yf.Ticker(y_symbol); info = ticker.info
+        execs = info.get('companyOfficers', [])
+        if execs:
+            ceo = next((p for p in execs if 'CEO' in p.get('title', '') or 'Chief Executive Officer' in p.get('title', '')), execs[0] if execs else None)
+            if ceo: details['ceo'] = ceo.get('name')
+        if roe := info.get('returnOnEquity'): details['returnOnEquity'] = f"{roe * 100:.2f}%"
+        if high := info.get('fiftyTwoWeekHigh'): details['52-Wk High'] = f"{high:,.2f}"
+        if low := info.get('fiftyTwoWeekLow'): details['52-Wk Low'] = f"{low:,.2f}"
+        return details
+    except Exception as e:
+        print(f"      - Could not fetch supplemental yfinance details: {e}"); return details
+
+def fetch_price_data(y_symbol):
+    print("  -> Fetching historical price data from yfinance...")
+    try:
+        ticker = yf.Ticker(y_symbol); df = ticker.history(period="1y", interval="1d")
+        if df.empty: raise ValueError(f"No price data for {y_symbol}")
+        index_ticker = yf.Ticker("^NSEI"); df_index = index_ticker.history(period="1y", interval="1d")
+        return df, df_index
+    except Exception as e:
+        print(f"      - Error fetching price data: {e}"); raise
 
 def fetch_yfinance_news(y_symbol):
     print("   -> Fetching from Yahoo Finance...")
@@ -155,67 +206,14 @@ def fetch_trendlyne_announcements(nse_symbol):
         return items
     except Exception as e: print(f"      - Could not fetch from Trendlyne Announcements: {e}"); return []
 
-def fetch_tickertape_data(nse_symbol):
-    print("  -> Fetching consolidated data from TickerTape API..."); bundle = { "shareholding": None, "metrics": {}, "peers": None, "profile": None, "sector": None }
-    try:
-        print("      - Step 1: Searching for stock's internal ID (sid)...")
-        search_url = f"https://api.tickertape.in/search?text={nse_symbol}&types=stock"
-        search_res = make_request_with_retries(search_url); search_data = search_res.json()
-        stock = next((s for s in search_data.get('data', {}).get('stocks', []) if s.get('ticker') == nse_symbol), None)
-        if not (stock and stock.get('sid')):
-            print(f"      - WARNING: Could not find a matching stock with a 'sid' for {nse_symbol} via search. Skipping TickerTape.")
-            return bundle
-        sid = stock['sid']; print(f"      - Found internal ID (sid): {sid}")
-        print(f"      - Step 2: Fetching data using sid '{sid}'...")
-        api_url = f"https://api.tickertape.in/stocks/info/{sid}"
-        api_res = make_request_with_retries(api_url); api_data = api_res.json()
-        if not api_data.get("success", False): print("      - WARNING: TickerTape API reported failure."); return bundle
-        tt_data = api_data.get("data", {})
-        if holding_data := tt_data.get("holding", {}).get("data"):
-            h_map = {"prom": "Promoter", "mf": "Mutual Funds", "dii": "Other Dom. Inst.", "fii": "Foreign Inst.", "ret": "Retail & Others"}
-            sh = {h_map.get(i.get("type")): float(i.get("value")) for i in holding_data if i.get("type") in h_map and i.get("value") is not None}
-            if "Other Dom. Inst." in sh: sh["Other Dom. Inst."] = sh.pop("Other Dom. Inst.", 0)
-            bundle["shareholding"] = {k: v for k, v in sh.items() if v > 0}; print("      - Parsed shareholding data.")
-        if ratios := tt_data.get("ratios", {}):
-            if r := ratios.get("mcap"): bundle["metrics"]["Market Cap (Cr)"] = f"{r / 1e7:,.2f}"
-            if r := ratios.get("pe"): bundle["metrics"]["P/E Ratio"] = f"{r:.2f}"
-            if r := ratios.get("pb"): bundle["metrics"]["P/B Ratio"] = f"{r:.2f}"
-            if r := ratios.get("dy"): bundle["metrics"]["Dividend Yield (%)"] = f"{r:.2f}"
-            print("      - Parsed key metrics.")
-        if sector_info := tt_data.get("sector"): bundle["sector"] = sector_info.get("sector"); print("      - Successfully parsed sector info.")
-        if peers := tt_data.get("peers"):
-            bundle["peers"] = {p.get("info", {}).get("ticker"): p.get("ratios", {}).get("pe") for p in peers[:4] if p.get("ratios", {}).get("pe")}; print("      - Parsed peer data.")
-        if desc := tt_data.get("profile", {}).get("description"):
-            summary = desc.split('.')[0] + '.'; bundle["profile"] = summary[:400].rsplit(' ', 1)[0] + '...' if len(summary) > 400 else summary; print("      - Parsed company profile.")
-    except Exception as e:
-        print(f"      - WARNING: An error occurred fetching from TickerTape API: {e}. Some data may be missing.")
-    return bundle
-
-def fetch_yfinance_supplemental_details(y_symbol):
-    print("  -> Fetching supplemental details (CEO, ROE) from yfinance...")
-    details = {"ceo": None, "returnOnEquity": None, "52-Wk High": None, "52-Wk Low": None}
-    try:
-        ticker = yf.Ticker(y_symbol); info = ticker.info
-        execs = info.get('companyOfficers', [])
-        if execs:
-            ceo = next((p for p in execs if 'CEO' in p.get('title', '') or 'Chief Executive Officer' in p.get('title', '')), execs[0] if execs else None)
-            if ceo: details['ceo'] = ceo.get('name')
-        if roe := info.get('returnOnEquity'): details['returnOnEquity'] = f"{roe * 100:.2f}%"
-        if high := info.get('fiftyTwoWeekHigh'): details['52-Wk High'] = f"{high:,.2f}"
-        if low := info.get('fiftyTwoWeekLow'): details['52-Wk Low'] = f"{low:,.2f}"
-        return details
-    except Exception as e:
-        print(f"      - Could not fetch supplemental yfinance details: {e}"); return details
-
-def fetch_price_data(y_symbol):
-    print("  -> Fetching historical price data from yfinance...")
-    try:
-        ticker = yf.Ticker(y_symbol); df = ticker.history(period="1y", interval="1d")
-        if df.empty: raise ValueError(f"No price data for {y_symbol}")
-        index_ticker = yf.Ticker("^NSEI"); df_index = index_ticker.history(period="1y", interval="1d")
-        return df, df_index
-    except Exception as e:
-        print(f"      - Error fetching price data: {e}"); raise
+def score_news_relevance(headline, company_name, source):
+    score = 0; headline_lower = headline.lower(); company_name_short = company_name.split()[0].lower()
+    if headline_lower.startswith(company_name_short): score += 30
+    elif company_name_short in headline_lower: score += 10
+    for keyword in config.IMPACT_KEYWORDS:
+        if keyword in headline_lower: score += 15
+    score += config.SOURCE_BONUS.get(source, 0)
+    return score
 
 def compute_price_snapshot(df):
     if len(df) < 2: return {"last_close": df.iloc[-1]["Close"], "d_pct": 0, "d5_pct": 0}

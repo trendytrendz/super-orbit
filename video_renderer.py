@@ -2,7 +2,7 @@
 import os
 import random
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 import cairosvg
 from scipy.ndimage import gaussian_filter
 
@@ -16,7 +16,16 @@ import config
 import utils
 import content_creator
 
-# --- Helper Functions ---
+def create_blurred_image(image_path, output_path, blur_radius=15):
+    try:
+        with Image.open(image_path) as img:
+            blurred_img = img.filter(ImageFilter.GaussianBlur(blur_radius))
+            blurred_img.save(output_path)
+            return output_path
+    except Exception as e:
+        print(f"    - WARNING: Could not blur image {image_path}. Error: {e}")
+        return None
+
 def create_chart_slide_image(chart_path, size):
     fg_img = Image.new("RGBA", size, (0,0,0,0));
     with Image.open(chart_path) as chart_img_file:
@@ -72,10 +81,14 @@ def create_pan_zoom_clip(duration, bg_path, size):
     except Exception as e:
         print(f"  - Warning: Could not create pan/zoom BG, using static color. Error: {e}"); return ColorClip(size=size, color=bg_color_tuple, duration=duration)
 
-# --- Main Video Rendering Function ---
 def make_video(slides, audio_paths, company, nse_symbol, video_format, out_path, assets, theme, icon_svg):
     VIDEO_W, VIDEO_H = (config.VIDEO_W_LANDSCAPE, config.VIDEO_H_LANDSCAPE) if video_format == 'landscape' else (config.VIDEO_W_PORTRAIT, config.VIDEO_H_PORTRAIT)
     font_path = theme['font']; bg_images = assets.get('bg_images', [])
+    blurred_bg_paths = {}
+    for i, img_path in enumerate(bg_images):
+        output_path = os.path.join(utils.get_script_dir(), "outputs", "tmp", f"bg_blurred_{i}.jpg")
+        if blurred_path := create_blurred_image(img_path, output_path):
+            blurred_bg_paths[img_path] = blurred_path
     audio_clips_timeline = []; slide_clips = []; current_time = 0.0; bg_idx = 0
     print("   -> Generating all slides and building timeline...")
 
@@ -92,8 +105,11 @@ def make_video(slides, audio_paths, company, nse_symbol, video_format, out_path,
         if duration <= 0:
             if audio_clip: audio_clip.close(); continue
         audio_clips_timeline.append(audio_clip.set_start(current_time))
-        bg_clip_raw = create_pan_zoom_clip(duration, bg_images[bg_idx % len(bg_images)] if bg_images else None, (VIDEO_W, VIDEO_H))
-        bg_clip = bg_clip_raw.fl_image(lambda frame: gaussian_filter(frame, sigma=15)) if slide_info.get('blur_bg', False) else bg_clip_raw
+        
+        bg_path = bg_images[bg_idx % len(bg_images)] if bg_images else None
+        final_bg_path = blurred_bg_paths.get(bg_path, bg_path) if slide_info.get('blur_bg', False) else bg_path
+        bg_clip = create_pan_zoom_clip(duration, final_bg_path, (VIDEO_W, VIDEO_H))
+        
         fg_clip = None
         if slide_info['type'] == 'intro':
             content = [{"type": "text", "text": slide_info['text'], "position": (VIDEO_W / 2, VIDEO_H * 0.65), "box": (VIDEO_W * 0.8, VIDEO_H * 0.4), "initial_fontsize": 90}]
@@ -107,16 +123,17 @@ def make_video(slides, audio_paths, company, nse_symbol, video_format, out_path,
             icon_clip = ImageClip(icon_path).set_duration(duration).set_position((VIDEO_W * 0.1, VIDEO_H * 0.15))
             text_clip = create_typing_text_clip(slide_info['text'], duration, font_path, 108, (VIDEO_W * 0.85, VIDEO_H * 0.8), ('center', 'center'), theme['accent']); fg_clip = CompositeVideoClip([text_clip, icon_clip])
         elif slide_info['type'] == 'summary':
-            is_title_slide = slide_info.get('is_title', False)
-            font_size = 90 if is_title_slide else 60
+            is_title_slide = slide_info.get('is_title', False); font_size = 90 if is_title_slide else 60
             content = [{"type": "text", "text": slide_info['text'], "position": (VIDEO_W / 2, VIDEO_H / 2), "box": (VIDEO_W * 0.85, VIDEO_H * 0.8), "initial_fontsize": font_size}]
             fg_img = create_slide_content(content, (VIDEO_W, VIDEO_H), font_path, theme); fg_clip = ImageClip(np.array(fg_img)).set_duration(duration)
         elif slide_info['type'] == 'chart':
-            if slide_info.get('path') and os.path.exists(slide_info['path']):
-                fg_img = create_chart_slide_image(slide_info['path'], (VIDEO_W, VIDEO_H)); fg_clip = ImageClip(np.array(fg_img)).set_duration(duration)
-            else: print(f"    - WARNING: Chart path for slide '{key}' not found. Skipping slide visuals."); fg_clip = ColorClip(size=(1,1), color=(0,0,0,0), duration=duration)
+            if (path := slide_info.get('path')) and os.path.exists(path):
+                fg_img = create_chart_slide_image(path, (VIDEO_W, VIDEO_H)); fg_clip = ImageClip(np.array(fg_img)).set_duration(duration)
+            else: print(f"    - WARNING: Chart path for slide '{key}' not found. Skipping visuals."); fg_clip = ColorClip(size=(1,1), color=(0,0,0,0), duration=duration)
         elif slide_info['type'] == 'cta':
-            icon_paths = {}; [cairosvg.svg2png(bytestring=svg, write_to=os.path.join(utils.get_script_dir(), "outputs", "tmp", f"icon_{name}.png"), output_height=80) for name, svg in config.OUTRO_ICONS.items()]; [icon_paths.update({name: os.path.join(utils.get_script_dir(), "outputs", "tmp", f"icon_{name}.png")}) for name in config.OUTRO_ICONS.keys()]
+            icon_paths = {name: os.path.join(utils.get_script_dir(), "outputs", "tmp", f"icon_{name}.png") for name in ['like', 'comment', 'share']}
+            for name in icon_paths.keys():
+                cairosvg.svg2png(bytestring=icon_svg[name], write_to=icon_paths[name], output_height=80)
             icon_size = (80, 80); y_pos_icon = VIDEO_H * 0.45; y_pos_text = y_pos_icon + 80
             content = [{"type": "image", "path": icon_paths['like'], "size": icon_size, "position": (VIDEO_W * 0.25, y_pos_icon)}, {"type": "text", "text": "Like", "position": (VIDEO_W * 0.25, y_pos_text), "initial_fontsize": 40}, {"type": "image", "path": icon_paths['comment'], "size": icon_size, "position": (VIDEO_W * 0.5, y_pos_icon)}, {"type": "text", "text": "Comment", "position": (VIDEO_W * 0.5, y_pos_text), "initial_fontsize": 40}, {"type": "image", "path": icon_paths['share'], "size": icon_size, "position": (VIDEO_W * 0.75, y_pos_icon)}, {"type": "text", "text": "Share", "position": (VIDEO_W * 0.75, y_pos_text), "initial_fontsize": 40}]
             fg_img = create_slide_content(content, (VIDEO_W, VIDEO_H), font_path, theme); fg_clip = ImageClip(np.array(fg_img)).set_duration(duration)
@@ -124,7 +141,6 @@ def make_video(slides, audio_paths, company, nse_symbol, video_format, out_path,
         else:
             if audio_clip: audio_clip.close()
     if not slide_clips: print("❌ ERROR: No slides were generated. Aborting video creation."); return
-
     total_dur = current_time; narration_audio = CompositeAudioClip(audio_clips_timeline)
     try:
         music_dir = os.path.join(utils.get_script_dir(), 'music'); music_files = [f for f in os.listdir(music_dir) if f.endswith('.mp3')] if os.path.exists(music_dir) else []
@@ -136,7 +152,7 @@ def make_video(slides, audio_paths, company, nse_symbol, video_format, out_path,
     print("\n  -> Assembling video with transitions..."); final_video_clips = [clip.crossfadein(1.0) if i > 0 else clip for i, clip in enumerate(slide_clips)]
     video = CompositeVideoClip(final_video_clips, size=(VIDEO_W, VIDEO_H)).set_duration(total_dur)
     full_audio_path = os.path.join(utils.get_script_dir(), "outputs", "tmp", "vo_full.mp3")
-    clips_for_concat = [audio_clip for audio_clip in audio_clips_timeline if isinstance(audio_clip, AudioFileClip)]
+    clips_for_concat = [clip for clip in audio_clips_timeline if isinstance(clip, AudioFileClip)]
     if clips_for_concat:
         full_narration_clip = concatenate_audioclips(clips_for_concat); full_narration_clip.write_audiofile(full_audio_path, codec='mp3', logger=None)
         subtitles_data = content_creator.generate_subtitles(full_audio_path); full_narration_clip.close()
