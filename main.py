@@ -52,7 +52,9 @@ def run_story_news(query, video_format, out_path, theme, icon_svg):
     import data_fetcher, chart_generator, content_creator, video_renderer
     print("Running Story: News Reporter")
     nse_symbol, y_symbol, display = data_fetcher.resolve_symbol(query)
-    all_news = (data_fetcher.fetch_yfinance_news(y_symbol) + data_fetcher.fetch_google_news(display, nse_symbol) + data_fetcher.fetch_moneycontrol_news(display) + data_fetcher.fetch_economic_times_news(display) + data_fetcher.fetch_trendlyne_announcements(nse_symbol))
+    all_news = (data_fetcher.fetch_yfinance_news(y_symbol) + data_fetcher.fetch_google_news(display, nse_symbol) +
+                data_fetcher.fetch_moneycontrol_news(display) + data_fetcher.fetch_economic_times_news(display) +
+                data_fetcher.fetch_trendlyne_announcements(nse_symbol))
     scored_news = [{**item, 'score': data_fetcher.score_news_relevance(item['title'], display, item['source'])} for item in all_news]
     unique_news = []; [unique_news.append(item) for item in sorted(scored_news, key=lambda x: x['score'], reverse=True) if not any(utils.seq_ratio(item['title'], un['title']) > 0.85 for un in unique_news)]
     news_items = unique_news[:config.MAX_NEWS_ITEMS]
@@ -62,11 +64,8 @@ def run_story_news(query, video_format, out_path, theme, icon_svg):
     print("\n--- Generating News Analysis with Local LLM ---")
     for i, item in enumerate(news_items):
         prompt = f"""You are a financial analyst creating a script for a short video. Your tone is simple, informative, and neutral. Given the following news headline for the company '{display}': "{item['title']}"
-        1. Briefly explain what this headline means in simple terms.
-        2. Explain the potential positive impact OR potential negative impact this could have on the company.
-        3. Generate a concise, 2-3 sentence narration for a video script based on this analysis. Do not give financial advice. Do not repeat the headline.
-        Your narration:"""
-        analysis = utils.query_local_llm(prompt)
+        Generate a concise, 1-2 sentence narration (about 30-40 words) that explains the significance of this news. Do not give financial advice. Do not repeat the headline. Start the narration directly."""
+        analysis = utils.query_local_llm(prompt, max_words=45)
         if analysis:
             print(f"      - LLM Analysis for News {i+1}: {analysis}")
             llm_narrations[f"news_{i+1}"] = analysis
@@ -79,15 +78,15 @@ def run_story_news(query, video_format, out_path, theme, icon_svg):
     slides = [{'type': 'intro', 'key': 'intro', 'text': f"{display}\nDaily Briefing", 'logo': True}]
     for i, item in enumerate(news_items): slides.append({'type': 'news', 'key': f'news_{i+1}', 'text': item['title'], 'icon': utils.classify_impact(item['title'])})
     slides.append({'type': 'chart', 'key': 'market', 'path': price_chart_path, 'blur_bg': True}); slides.append({'type': 'cta', 'key': 'cta'})
-    assets = fetch_pexels_bgs(len(slides), display, video_format); assets['logo'] = data_fetcher.fetch_company_logo(y_symbol)
+    assets = fetch_pexels_bgs(len(slides), display, video_format)
+    assets['logo'] = data_fetcher.fetch_company_logo(y_symbol)
     video_renderer.make_video(slides, audio_paths, display, nse_symbol, video_format, out_path, assets, theme, icon_svg)
 
 def run_story_deepdive(query, video_format, out_path, theme, icon_svg):
     import data_fetcher, chart_generator, content_creator, video_renderer
     print("Running Story: Stock 101 Deep Dive")
     nse_symbol, y_symbol, display = data_fetcher.resolve_symbol(query)
-    tt_data = data_fetcher.fetch_tickertape_data(nse_symbol)
-    yfinance_details = data_fetcher.fetch_yfinance_supplemental_details(y_symbol)
+    tt_data = data_fetcher.fetch_tickertape_data(nse_symbol); yfinance_details = data_fetcher.fetch_yfinance_supplemental_details(y_symbol)
     df, _ = data_fetcher.fetch_price_data(y_symbol)
     all_metrics = {**tt_data['metrics'], **{k: v for k, v in yfinance_details.items() if k in ['52-Wk High', '52-Wk Low']}}
     details = {'name': display, 'summary': tt_data['profile'], 'ceo': yfinance_details['ceo'], 'peers': list(tt_data['peers'].keys()) if tt_data['peers'] else []}

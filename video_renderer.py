@@ -55,15 +55,38 @@ def create_slide_content(content_elements, size, font_path, theme):
                 fg_img.paste(img_to_paste, paste_pos, img_to_paste)
     return fg_img
 
+# --- ROBUST TYPING ANIMATION FUNCTION ---
 def create_typing_text_clip(text, duration, font, initial_fontsize, box_size, pos, color):
+    """
+    Creates a moviepy clip with a typing animation effect by concatenating TextClips.
+    Returns the concatenated animation clip and the final static clip.
+    """
     font_obj = utils.get_optimal_font_size(text, initial_fontsize, box_size[0], box_size[1], font)
-    wrapped_lines = utils.wrap_text_pil(text, font_obj, box_size[0]); full_text_for_anim = "\n".join(wrapped_lines)
-    clips = []; text_len = len(full_text_for_anim); char_duration = duration / (text_len + 1) if text_len > 0 else duration
-    for i in range(text_len):
-        sub_text = full_text_for_anim[:i+1]
-        txt_clip = TextClip(sub_text, font=font, fontsize=font_obj.size, color=color, align='center', size=box_size, method='caption').set_duration(char_duration); clips.append(txt_clip)
-    if not clips: return ColorClip(size=(1,1), color=(0,0,0,0), duration=duration)
-    return concatenate_videoclips(clips).set_position(pos)
+    wrapped_lines = utils.wrap_text_pil(text, font_obj, box_size[0])
+    full_text_for_anim = "\n".join(wrapped_lines)
+    
+    clips = []
+    text_len = len(full_text_for_anim)
+    char_duration = (duration / text_len) if text_len > 0 else duration
+
+    # Create a clip for each character addition
+    for i in range(1, text_len + 1):
+        sub_text = full_text_for_anim[:i]
+        txt_clip = TextClip(sub_text, font=font, fontsize=font_obj.size, color=color, align='center', size=box_size, method='caption').set_duration(char_duration)
+        clips.append(txt_clip)
+    
+    if not clips:
+        # If no text, return empty clips
+        empty_clip = ColorClip(size=box_size, color=(0,0,0,0), duration=duration).set_position(pos)
+        return empty_clip, empty_clip.copy().set_duration(0)
+
+    # The final frame is a static TextClip of the full text
+    final_clip = TextClip(full_text_for_anim, font=font, fontsize=font_obj.size, color=color, align='center', size=box_size, method='caption')
+    
+    # The animation is the concatenation of all sub-clips
+    animation = concatenate_videoclips(clips).set_position(pos)
+    
+    return animation, final_clip.set_position(pos)
 
 def create_pan_zoom_clip(duration, bg_path, size):
     bg_color_tuple = tuple(int(config.BG_COLOR.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
@@ -81,14 +104,17 @@ def create_pan_zoom_clip(duration, bg_path, size):
     except Exception as e:
         print(f"  - Warning: Could not create pan/zoom BG, using static color. Error: {e}"); return ColorClip(size=size, color=bg_color_tuple, duration=duration)
 
+# --- Main Video Rendering Function ---
 def make_video(slides, audio_paths, company, nse_symbol, video_format, out_path, assets, theme, icon_svg):
     VIDEO_W, VIDEO_H = (config.VIDEO_W_LANDSCAPE, config.VIDEO_H_LANDSCAPE) if video_format == 'landscape' else (config.VIDEO_W_PORTRAIT, config.VIDEO_H_PORTRAIT)
     font_path = theme['font']; bg_images = assets.get('bg_images', [])
+    
     blurred_bg_paths = {}
     for i, img_path in enumerate(bg_images):
         output_path = os.path.join(utils.get_script_dir(), "outputs", "tmp", f"bg_blurred_{i}.jpg")
         if blurred_path := create_blurred_image(img_path, output_path):
             blurred_bg_paths[img_path] = blurred_path
+            
     audio_clips_timeline = []; slide_clips = []; current_time = 0.0; bg_idx = 0
     print("   -> Generating all slides and building timeline...")
 
@@ -97,10 +123,10 @@ def make_video(slides, audio_paths, company, nse_symbol, video_format, out_path,
         audio_clip = None; duration = 0
         if key in audio_paths and os.path.exists(audio_paths[key]):
             try:
-                audio_clip = AudioFileClip(audio_paths[key]); duration = audio_clip.duration + 1.0
-            except Exception as e: print(f"    - WARNING: Could not read audio duration for '{key}'. Skipping slide. Error: {e}"); continue
+                audio_clip = AudioFileClip(audio_paths[key]); audio_duration = audio_clip.duration
+                padding = 1.8; duration = audio_duration + padding; duration = max(duration, 4.5)
+            except Exception as e: print(f"    - WARNING: Could not read audio duration for '{key}'. Skipping. Error: {e}"); continue
         else:
-            print(f"    - No audio for '{key}'. Creating a silent title slide.")
             duration = config.TITLE_SLIDE_DURATION; audio_clip = AudioClip(lambda t: [0, 0], duration=duration, fps=44100)
         if duration <= 0:
             if audio_clip: audio_clip.close(); continue
@@ -121,7 +147,20 @@ def make_video(slides, audio_paths, company, nse_symbol, video_format, out_path,
         elif slide_info['type'] == 'news':
             icon_path = os.path.join(utils.get_script_dir(), "outputs", "tmp", f"{slide_info['icon']}_icon.png"); cairosvg.svg2png(bytestring=icon_svg[slide_info['icon']], write_to=icon_path, output_height=60)
             icon_clip = ImageClip(icon_path).set_duration(duration).set_position((VIDEO_W * 0.1, VIDEO_H * 0.15))
-            text_clip = create_typing_text_clip(slide_info['text'], duration, font_path, 108, (VIDEO_W * 0.85, VIDEO_H * 0.8), ('center', 'center'), theme['accent']); fg_clip = CompositeVideoClip([text_clip, icon_clip])
+
+            # --- ROBUST TYPING & HOLD LOGIC ---
+            typing_duration = min(3.5, duration * 0.7)
+            animation, final_text = create_typing_text_clip(slide_info['text'], typing_duration, font_path, 108, (VIDEO_W * 0.85, VIDEO_H * 0.8), ('center', 'center'), theme['accent'])
+            hold_duration = duration - animation.duration
+            if hold_duration > 0:
+                hold_clip = final_text.set_duration(hold_duration)
+                text_element = concatenate_videoclips([animation, hold_clip])
+            else:
+                text_element = animation.set_duration(duration)
+            
+            fg_clip = CompositeVideoClip([text_element, icon_clip])
+            # --- END ROBUST LOGIC ---
+
         elif slide_info['type'] == 'summary':
             is_title_slide = slide_info.get('is_title', False); font_size = 90 if is_title_slide else 60
             content = [{"type": "text", "text": slide_info['text'], "position": (VIDEO_W / 2, VIDEO_H / 2), "box": (VIDEO_W * 0.85, VIDEO_H * 0.8), "initial_fontsize": font_size}]
@@ -137,6 +176,7 @@ def make_video(slides, audio_paths, company, nse_symbol, video_format, out_path,
             icon_size = (80, 80); y_pos_icon = VIDEO_H * 0.45; y_pos_text = y_pos_icon + 80
             content = [{"type": "image", "path": icon_paths['like'], "size": icon_size, "position": (VIDEO_W * 0.25, y_pos_icon)}, {"type": "text", "text": "Like", "position": (VIDEO_W * 0.25, y_pos_text), "initial_fontsize": 40}, {"type": "image", "path": icon_paths['comment'], "size": icon_size, "position": (VIDEO_W * 0.5, y_pos_icon)}, {"type": "text", "text": "Comment", "position": (VIDEO_W * 0.5, y_pos_text), "initial_fontsize": 40}, {"type": "image", "path": icon_paths['share'], "size": icon_size, "position": (VIDEO_W * 0.75, y_pos_icon)}, {"type": "text", "text": "Share", "position": (VIDEO_W * 0.75, y_pos_text), "initial_fontsize": 40}]
             fg_img = create_slide_content(content, (VIDEO_W, VIDEO_H), font_path, theme); fg_clip = ImageClip(np.array(fg_img)).set_duration(duration)
+        
         if fg_clip: slide_clips.append(CompositeVideoClip([bg_clip, fg_clip]).set_start(current_time).set_duration(duration)); bg_idx += 1; current_time += duration
         else:
             if audio_clip: audio_clip.close()

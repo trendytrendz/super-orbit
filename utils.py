@@ -3,6 +3,7 @@ import os
 import time
 import requests
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from PIL import Image, ImageDraw, ImageFont
@@ -16,8 +17,8 @@ except ImportError:
 
 import config
 
-def query_local_llm(prompt):
-    """Sends a prompt to the local Ollama server and gets a response."""
+def query_local_llm(prompt, max_words=40):
+    """Sends a prompt to the local Ollama server and gets a cleaned, truncated response."""
     print("   -> Querying local LLM for insights...")
     try:
         url = "http://localhost:11434/api/generate"
@@ -26,21 +27,30 @@ def query_local_llm(prompt):
             "prompt": prompt,
             "stream": False,
             "options": {
-                "temperature": 0.3
+                "temperature": 0.2
             }
         }
         response = requests.post(url, json=payload, timeout=90)
         response.raise_for_status()
         
-        response_json = response.json()
-        analysis = response_json.get("response", "").strip().replace('"', '')
+        analysis = response.json().get("response", "").strip()
 
-        if "Here is a concise narration" in analysis:
-            analysis = analysis.split(":\n", 1)[-1].strip()
-        if analysis.startswith("This means"):
-            analysis = "This means " + analysis.split("This means", 1)[-1].strip()
+        # --- Aggressive Cleaning Logic ---
+        # Remove any leading text that ends in a colon, e.g., "Here's my analysis:"
+        analysis = re.sub(r'^(.*:)\s*', '', analysis, flags=re.IGNORECASE | re.DOTALL)
+        # Remove markdown bolding/italics and backticks
+        analysis = re.sub(r'[\*_`]', '', analysis)
+        # Remove any list-like formatting at the beginning (e.g., "1. ", "- ")
+        analysis = re.sub(r'^\s*[\d-]+\.\s*', '', analysis)
+        
+        analysis = analysis.strip().replace('"', '')
 
-        print("      - LLM analysis received.")
+        # --- Truncation Logic ---
+        words = analysis.split()
+        if len(words) > max_words:
+            analysis = " ".join(words[:max_words]) + "..."
+        
+        print("      - LLM analysis received and cleaned.")
         return analysis
 
     except requests.exceptions.RequestException as e:

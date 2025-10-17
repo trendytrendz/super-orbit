@@ -2,13 +2,13 @@
 import os
 
 # Version
-__version__ = "15.0.3"
+__version__ = "15.0.9"
 
 # Video Dimensions & Timings
 VIDEO_W_LANDSCAPE, VIDEO_H_LANDSCAPE = 1280, 720
 VIDEO_W_PORTRAIT, VIDEO_H_PORTRAIT = 720, 1280
 BG_COLOR = "#080C14"
-TITLE_SLIDE_DURATION = 3.0
+TITLE_SLIDE_DURATION = 3.0 # Duration in seconds for silent title slides
 
 # Font Discovery
 FONT_PATHS = [
@@ -45,8 +45,6 @@ SOURCE_BONUS = {
     "Google News": 0,
     "Trendlyne Announcements": 25
 }
-
-# NOTE: OUTRO_ICONS have been moved to main.py to be dynamically themed.
 
 # Base Theme Palettes
 BASE_THEMES = [
