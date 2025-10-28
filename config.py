@@ -1,7 +1,7 @@
 import os
 
 # Version
-__version__ = "17.0.2"
+__version__ = "17.0.3"
 
 # Video Dimensions & Timings
 VIDEO_W_LANDSCAPE, VIDEO_H_LANDSCAPE = 1280, 720
