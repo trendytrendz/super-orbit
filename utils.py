@@ -1,4 +1,3 @@
-# utils.py
 import os
 import time
 import requests
@@ -7,7 +6,11 @@ import re
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from PIL import Image, ImageDraw, ImageFont
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote_plus
+from bs4 import BeautifulSoup
+import base64
+from io import BytesIO
+import random
 
 try:
     from fake_useragent import UserAgent
@@ -17,48 +20,66 @@ except ImportError:
 
 import config
 
-def query_local_llm(prompt, max_words=40):
-    """Sends a prompt to the local Ollama server and gets a cleaned, truncated response."""
-    print("   -> Querying local LLM for insights...")
+def get_llm_search_terms(company_name, business_summary):
+    """Uses an LLM to brainstorm visually relevant search terms for Pexels."""
+    context = business_summary if business_summary and business_summary.strip() else company_name
+    print(f"      - Using LLM to generate keywords from context: '{context[:100]}...'")
+
+    prompt = f"""
+    You are an AI Art Director for a financial video. Your task is to generate visually evocative search terms for a stock photo website (like Pexels) based on a company's description.
+
+    **Instructions:**
+    1.  **Analyze the Context:** Read the company name and business summary provided below.
+    2.  **Brainstorm Visual Themes:** Think about the industry, products, and underlying concepts (e.g., innovation, logistics, energy, data).
+    3.  **Generate Keywords:** Create a list of 5-7 concise, one or two-word keywords.
+    4.  **CRITICAL RULE:** Keywords **MUST NOT** include people, faces, or crowds. Focus on objects, machinery, abstract concepts, and environments.
+    5.  **Output Format:** Provide the output as a single, comma-separated line.
+
+    **Context:**
+    - Company: "{company_name}"
+    - Business Summary: "{context}"
+
+    **Example 1 (for an automobile company):**
+    `car factory, assembly line, highway driving, abstract speed, futuristic car design, engine detail, metal texture`
+
+    **Example 2 (for a software company):**
+    `data center, server room, glowing circuits, abstract network, binary code, motherboard, fiber optics`
+
+    **Your Keywords:**
+    """
+    
+    print("   -> Using smarter LLM to brainstorm background keywords...")
+    response = query_local_llm(prompt, max_words=40)
+    
+    if response:
+        first_line = response.split('\n')[0]
+        keywords = [k.strip() for k in first_line.split(',') if k.strip() and len(k.strip()) < 30]
+        if keywords:
+            print(f"      - LLM suggested keywords: {keywords}")
+            return keywords
+            
+    print("      - LLM keyword generation failed or returned invalid output. Using fallbacks.")
+    return []
+
+def query_local_llm(prompt, max_words=45):
     try:
         url = "http://localhost:11434/api/generate"
-        payload = {
-            "model": "llama3:8b",
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": 0.2
-            }
-        }
+        payload = { "model": "llama3:8b", "prompt": prompt, "stream": False, "options": { "temperature": 0.2 } }
         response = requests.post(url, json=payload, timeout=90)
         response.raise_for_status()
-        
         analysis = response.json().get("response", "").strip()
-
-        # --- Aggressive Cleaning Logic ---
-        # Remove any leading text that ends in a colon, e.g., "Here's my analysis:"
         analysis = re.sub(r'^(.*:)\s*', '', analysis, flags=re.IGNORECASE | re.DOTALL)
-        # Remove markdown bolding/italics and backticks
-        analysis = re.sub(r'[\*_`]', '', analysis)
-        # Remove any list-like formatting at the beginning (e.g., "1. ", "- ")
+        analysis = re.sub(r'[\*_`#]', '', analysis)
         analysis = re.sub(r'^\s*[\d-]+\.\s*', '', analysis)
-        
         analysis = analysis.strip().replace('"', '')
-
-        # --- Truncation Logic ---
         words = analysis.split()
-        if len(words) > max_words:
-            analysis = " ".join(words[:max_words]) + "..."
-        
-        print("      - LLM analysis received and cleaned.")
+        if len(words) > max_words: analysis = " ".join(words[:max_words]) + "..."
         return analysis
-
     except requests.exceptions.RequestException as e:
         print(f"      - WARNING: Could not connect to local LLM. Is Ollama running? Error: {e}")
         return None
-
-def get_script_dir():
-    return os.path.dirname(os.path.realpath(__file__))
+        
+def get_script_dir(): return os.path.dirname(os.path.realpath(__file__))
 
 def ensure_dirs():
     script_dir = get_script_dir()
@@ -66,36 +87,27 @@ def ensure_dirs():
     os.makedirs(os.path.join(script_dir, "outputs", "tmp"), exist_ok=True)
     os.makedirs(os.path.join(script_dir, "music"), exist_ok=True)
 
-def now_ist():
-    return datetime.now(timezone(timedelta(hours=5, minutes=30)))
+def now_ist(): return datetime.now(timezone(timedelta(hours=5, minutes=30)))
 
-def seq_ratio(a, b):
-    return SequenceMatcher(None, (a or "").lower(), (b or "").lower()).ratio()
+def seq_ratio(a, b): return SequenceMatcher(None, (a or "").lower(), (b or "").lower()).ratio()
 
 def classify_impact(text):
     t = (text or "").lower()
+    prompt = f"""Analyze the sentiment of the following financial news headline. Your response must be only one word: 'positive', 'negative', or 'neutral'.\n\nHeadline: "{t}"\nSentiment:"""
+    sentiment = query_local_llm(prompt, max_words=2)
+    if sentiment:
+        cleaned_sentiment = sentiment.lower().strip().replace('.', '')
+        if cleaned_sentiment in ['positive', 'negative', 'neutral']:
+            return cleaned_sentiment
+    print("      - LLM sentiment failed, falling back to keyword matching.")
     if any(k in t for k in config.POSITIVE_CUES): return "positive"
     if any(k in t for k in config.NEGATIVE_CUES): return "negative"
     return "uncertain"
 
 def get_browser_headers(url=""):
-    base_headers = {
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.tickertape.in/",
-        "Sec-Ch-Ua": '"Google Chrome";v="125", "Chromium";v="125", "Not.A/Brand";v="24"',
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"macOS"',
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-site",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-    }
-    if FAKE_USERAGENT_AVAILABLE:
-        base_headers['User-Agent'] = UserAgent().random
-    if "tickertape.in" in urlparse(url).netloc:
-        base_headers['x-tickertape-div'] = "7df92dc3-b097-421b-8c28-724d265a7098"
+    base_headers = { "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7", "Accept-Encoding": "gzip, deflate, br", "Accept-Language": "en-US,en;q=0.9", "Sec-Ch-Ua": '"Google Chrome";v="125", "Chromium";v="125", "Not.A/Brand";v="24"', "Sec-Ch-Ua-Mobile": "?0", "Sec-Ch-Ua-Platform": '"macOS"', "Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Site": "none", "Sec-Fetch-User": "?1", "Upgrade-Insecure-Requests": "1", "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36" }
+    if FAKE_USERAGENT_AVAILABLE: base_headers['User-Agent'] = UserAgent().random
+    if "tickertape.in" in urlparse(url).netloc: base_headers.update({'x-tickertape-div': "7df92dc3-b097-421b-8c28-724d265a7098", 'Referer': "https://www.tickertape.in/", 'Sec-Fetch-Site': "same-site"})
     return base_headers
 
 def make_request_with_retries(url, headers=None, timeout=45, retries=3, delay=5):
@@ -106,6 +118,7 @@ def make_request_with_retries(url, headers=None, timeout=45, retries=3, delay=5)
             response.raise_for_status()
             return response
         except requests.exceptions.RequestException as e:
+            # MODIFIED: Corrected indentation for the except block.
             print(f"      - Attempt {attempt + 1}/{retries} failed for URL: {e}")
             if attempt < retries - 1:
                 time.sleep(delay)
@@ -147,7 +160,7 @@ def get_optimal_font_size(text, initial_size, max_width, max_height, font_path):
 def wrap_text_for_subtitles(text, max_chars_per_line=40):
     text = text.strip()
     if not text: return ""
-    words = text.split();
+    words = text.split()
     if not words: return ""
     lines, current_line = [], ""
     for word in words:
