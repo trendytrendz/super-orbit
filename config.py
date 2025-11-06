@@ -18,9 +18,11 @@ def get_available_fonts():
     """Get available fonts with proper validation"""
     font_paths = [
         "/System/Library/Fonts/Helvetica.ttc",
-        "/System/Library/Fonts/HelveticaNeue.ttc", 
-        "/System/Library/Fonts/Arial.ttf",
-        "/System/Library/Fonts/Arial Bold.ttf",
+        "/System/Library/Fonts/HelveticaNeue.ttc",
+        "/usr/share/fonts/truetype/msttcorefonts/Arial.ttf",
+        "/usr/share/fonts/truetype/msttcorefonts/Arial_Bold.ttf",
+        #"/System/Library/Fonts/Arial.ttf",
+        #"/System/Library/Fonts/Arial Bold.ttf",
         str(Path.home() / "Library" / "Fonts" / "Arial.ttf"),
     ]
     available_fonts = [f for f in font_paths if os.path.exists(f)]
