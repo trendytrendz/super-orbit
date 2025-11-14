@@ -16,10 +16,30 @@ try:
 except ImportError:
     PEXELS_AVAILABLE = False
 
-# --- PEXELS HELPER FUNCTION ---
-def fetch_pexels_bgs(num_bgs_needed, search_term, video_format):
+# --- BACKGROUND IMAGE HELPER ---
+def fetch_backgrounds(y_symbol, num_bgs_needed, search_term, video_format):
+    import data_fetcher
     assets = {}
-    if not (PEXELS_AVAILABLE and os.getenv("PEXELS_API_KEY")): return assets
+
+    # Try to fetch from the company website first
+    website_images = data_fetcher.fetch_website_images(y_symbol, video_format, num_bgs_needed)
+    if website_images:
+        assets['bg_images'] = website_images
+        try:
+            import yfinance as yf
+            domain = yf.Ticker(y_symbol).info.get('website', '').split('//')[-1].split('/')[0]
+            assets['bg_credit'] = f"Images by {domain}"
+        except Exception:
+            assets['bg_credit'] = "Images from Company Website"
+        print(f"   -> Successfully sourced {len(website_images)} images from the company website.")
+        return assets
+
+    print("   -> Website image fetching failed or yielded no results. Falling back to Pexels.")
+
+    # Fallback to Pexels
+    if not (PEXELS_AVAILABLE and os.getenv("PEXELS_API_KEY")):
+        print("   -> Pexels API key not available. Using solid color backgrounds.")
+        return assets
     print(f"\n   -> Fetching {num_bgs_needed} background images from Pexels...")
     try:
         api = API(os.getenv("PEXELS_API_KEY")); clean_search_term = search_term.split()[0]
@@ -63,7 +83,8 @@ def run_story_news(query, video_format, out_path, theme, icon_svg):
     slides = [{'type': 'intro', 'key': 'intro', 'text': f"{display}\nDaily Briefing", 'logo': True}]
     for i, item in enumerate(news_items): slides.append({'type': 'news', 'key': f'news_{i+1}', 'text': item['title'], 'icon': utils.classify_impact(item['title'])})
     slides.append({'type': 'chart', 'key': 'market', 'path': price_chart_path, 'blur_bg': True}); slides.append({'type': 'cta', 'key': 'cta'})
-    assets = fetch_pexels_bgs(len(slides), display, video_format); assets['logo'] = data_fetcher.fetch_company_logo(y_symbol)
+    assets = fetch_backgrounds(y_symbol, len(slides), display, video_format)
+    assets['logo'] = data_fetcher.fetch_company_logo(y_symbol)
     script_parts = content_creator.build_narration_news(display, news_items, snap)
     audio_paths = content_creator.generate_segmented_voiceover(script_parts)
     video_renderer.make_video(slides, audio_paths, display, nse_symbol, video_format, out_path, assets, theme, icon_svg)
@@ -92,7 +113,8 @@ def run_story_deepdive(query, video_format, out_path, theme, icon_svg):
     if shareholding_path: slides.append({'type': 'chart', 'key': 'shareholding', 'path': shareholding_path, 'blur_bg': True})
     if price_chart_path: slides.append({'type': 'chart', 'key': 'market', 'path': price_chart_path, 'blur_bg': True})
     slides.append({'type': 'cta', 'key': 'cta'})
-    assets = fetch_pexels_bgs(len(slides), display, video_format); assets['logo'] = data_fetcher.fetch_company_logo(y_symbol)
+    assets = fetch_backgrounds(y_symbol, len(slides), display, video_format)
+    assets['logo'] = data_fetcher.fetch_company_logo(y_symbol)
     script_parts = content_creator.build_narration_deepdive(details, all_metrics, tt_data['shareholding'], peers_exist=bool(details.get("peers")))
     audio_paths = content_creator.generate_segmented_voiceover(script_parts)
     video_renderer.make_video(slides, audio_paths, display, nse_symbol, video_format, out_path, assets, theme, icon_svg)
@@ -112,7 +134,7 @@ def run_story_comparison(query_a, query_b, video_format, out_path, theme, icon_s
     if mcap_chart_path: slides.append({'type': 'chart', 'key': 'mcap_compare', 'path': mcap_chart_path, 'blur_bg': True})
     if price_chart_path: slides.append({'type': 'chart', 'key': 'price_compare', 'path': price_chart_path, 'blur_bg': True})
     slides.append({'type': 'cta', 'key': 'cta'})
-    assets = fetch_pexels_bgs(len(slides), display_a, video_format)
+    assets = fetch_backgrounds(y_a, len(slides), display_a, video_format)
     script_parts = content_creator.build_narration_comparison(display_a, display_b, tt_data_a['metrics'], tt_data_b['metrics'])
     audio_paths = content_creator.generate_segmented_voiceover(script_parts)
     video_renderer.make_video(slides, audio_paths, display_a, f"{nse_a}_vs_{nse_b}", video_format, out_path, assets, theme, icon_svg)
@@ -140,7 +162,7 @@ def run_story_spotlight(query, video_format, out_path, theme, icon_svg):
         if valuation_path: slides.append({'type': 'chart', 'key': 'valuation', 'path': valuation_path, 'blur_bg': True})
         if peer_chart_path: slides.append({'type': 'chart', 'key': 'peers', 'path': peer_chart_path, 'blur_bg': True})
     slides.append({'type': 'summary', 'key': 'summary', 'text': "This analysis provides a structured way to evaluate a company, but is not financial advice."}); slides.append({'type': 'cta', 'key': 'cta'})
-    assets = fetch_pexels_bgs(len(slides), display, video_format)
+    assets = fetch_backgrounds(y_symbol, len(slides), display, video_format)
     assets['logo'] = data_fetcher.fetch_company_logo(y_symbol)
     # CRITICAL FIX: DO NOT generate dummy audio. The renderer will handle it.
     script_parts = content_creator.build_narration_spotlight(narration_details, tt_data['metrics'], tt_data['shareholding'], peers_exist=bool(tt_data['peers']))
