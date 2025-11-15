@@ -1,0 +1,16 @@
+.venv/
+.idea/
+.vscode/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+dist/
+build/
+*.log
+*.DS_Store
+outputs/
+symbol_cache.json
+nse_symbols.csv
