@@ -6,7 +6,8 @@ import re
 import yfinance as yf
 import pandas as pd
 import feedparser
-from urllib.parse import quote_plus
+import random
+from urllib.parse import quote_plus, urljoin
 from datetime import datetime, timezone
 from io import BytesIO
 from PIL import Image
@@ -231,3 +232,68 @@ def fetch_company_logo(y_symbol):
             if response and response.status_code == 200: return Image.open(BytesIO(response.content)).convert("RGBA")
     except Exception: pass
     return None
+
+def fetch_website_images(y_symbol, video_format, num_images=5):
+    print("  -> Fetching images from company website...")
+    image_paths = []
+    try:
+        website = yf.Ticker(y_symbol).info.get('website')
+        if not website:
+            print("      - LOG: No website found in yfinance info.")
+            return []
+        print(f"      - LOG: Found website: {website}")
+
+        response = make_request_with_retries(website, timeout=20)
+        if not response:
+            print(f"      - LOG: Could not fetch website content from {website}.")
+            return []
+
+        soup = BeautifulSoup(response.content, 'html.parser')
+        img_tags = soup.find_all('img')
+        print(f"      - LOG: Found {len(img_tags)} image tags on the page.")
+
+        potential_urls = []
+        for img in img_tags:
+            src = img.get('src') or img.get('data-src') # Check for lazy-loading attribute
+            if src:
+                full_url = urljoin(website, src)
+                potential_urls.append(full_url)
+
+        potential_urls = list(set(potential_urls))
+        random.shuffle(potential_urls)
+        print(f"      - LOG: Found {len(potential_urls)} unique image URLs.")
+
+        is_portrait = (video_format == 'portrait')
+
+        for i, url in enumerate(potential_urls):
+            if len(image_paths) >= num_images:
+                break
+            print(f"      - LOG: Checking image {i+1}/{len(potential_urls)}: {url}")
+            try:
+                img_response = make_request_with_retries(url, stream=True, timeout=10)
+                if img_response and 'image' in img_response.headers.get('Content-Type', ''):
+                    with Image.open(BytesIO(img_response.content)) as img:
+                        orientation_str = "portrait" if img.height > img.width else "landscape"
+                        print(f"        - LOG: Image dimensions: {img.width}x{img.height} ({orientation_str})")
+                        correct_orientation = (img.height > img.width) if is_portrait else (img.width > img.height)
+                        if correct_orientation and img.width > 400 and img.height > 400:
+                            img_path = os.path.join("outputs", "tmp", f"web_bg_{len(image_paths)}.jpg")
+                            with open(img_path, 'wb') as f:
+                                f.write(img_response.content)
+                            image_paths.append(img_path)
+                            print(f"        - SUCCESS: Image is suitable and saved to {img_path}")
+                        else:
+                            print(f"        - LOG: Image skipped due to orientation or size.")
+                else:
+                    print(f"        - LOG: Skipped non-image URL.")
+
+            except Exception as e:
+                print(f"        - WARNING: Could not process image URL: {e}")
+                continue
+
+        print(f"      - LOG: Finished scraping. Found {len(image_paths)} suitable images.")
+        return image_paths
+
+    except Exception as e:
+        print(f"      - ERROR: An unexpected error occurred while fetching website images: {e}")
+        return []
