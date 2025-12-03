@@ -6,6 +6,8 @@ import time
 import traceback
 import multiprocessing
 from PIL import Image
+import glob
+import shutil
 
 import config
 import utils
@@ -19,31 +21,108 @@ except ImportError:
 # --- PEXELS HELPER FUNCTION ---
 def fetch_pexels_bgs(num_bgs_needed, search_term, video_format):
     assets = {}
-    if not (PEXELS_AVAILABLE and os.getenv("PEXELS_API_KEY")): return assets
+    if not (PEXELS_AVAILABLE and os.getenv("PEXELS_API_KEY")):
+        return assets
     print(f"\n   -> Fetching {num_bgs_needed} background images from Pexels...")
+    # Prepare/clean temp bg directory so old images don't accumulate
+    bg_dir = os.path.join(utils.get_script_dir(), "outputs", "tmp")
     try:
-        api = API(os.getenv("PEXELS_API_KEY")); clean_search_term = search_term.split()[0]
-        search_queries = [f"{clean_search_term} abstract", "data visualization", "stock market", "business analytics"]; random.shuffle(search_queries)
-        is_portrait = (video_format == 'portrait'); bg_image_paths = []; found_urls = set()
+        os.makedirs(bg_dir, exist_ok=True)
+        # remove only bg_*.jpg/png files created by prior runs
+        for p in glob.glob(os.path.join(bg_dir, "bg_*")):
+            try:
+                if os.path.isfile(p) or os.path.islink(p):
+                    os.remove(p)
+                elif os.path.isdir(p):
+                    shutil.rmtree(p)
+            except Exception as e:
+                print(f"      - Warning: failed to remove {p}: {e}")
+    except Exception as e:
+        print(f"      - Warning: could not prepare bg dir {bg_dir}: {e}")
+
+    try:
+        api = API(os.getenv("PEXELS_API_KEY"))
+        clean_search_term = (search_term.split()[0] if search_term else "abstract")
+        # broaden queries to increase chance of suitable abstract backgrounds
+        search_queries = [
+            f"{clean_search_term} abstract",
+            "data visualization",
+            "business abstract",
+            "gradient abstract",
+        ]
+        random.shuffle(search_queries)
+        is_portrait = (video_format == 'portrait')
+        bg_image_paths = []
+        found_urls = set()
+
         for query in search_queries:
-            if len(bg_image_paths) >= num_bgs_needed: break
-            api.search(query, page=random.randint(1, 5), results_per_page=80)
-            for photo in api.get_entries():
-                if len(bg_image_paths) >= num_bgs_needed: break
-                if photo.url in found_urls: continue
-                correct_orientation = (photo.height > photo.width) if is_portrait else (photo.width > photo.height)
-                if not correct_orientation: continue
-                if hasattr(photo, 'large2x'):
-                    img_url = photo.large2x; print(f"      - Downloading background: {os.path.basename(img_url)}")
+            if len(bg_image_paths) >= num_bgs_needed:
+                break
+            page = 1
+            while len(bg_image_paths) < num_bgs_needed:
+                try:
+                    api.search(query, page=page, results_per_page=80)
+                except Exception as e:
+                    print(f"      - Pexels API search failed for '{query}' page {page}: {e}")
+                    break
+
+                entries = api.get_entries() or []
+                if not entries:
+                    break
+
+                for photo in entries:
+                    if len(bg_image_paths) >= num_bgs_needed:
+                        break
+                    photo_page_url = getattr(photo, 'url', None)
+                    if photo_page_url in found_urls:
+                        continue
+
+                    # orientation check
+                    try:
+                        w = int(getattr(photo, 'width', 0))
+                        h = int(getattr(photo, 'height', 0))
+                    except Exception:
+                        w, h = 0, 0
+                    correct_orientation = (h > w) if is_portrait else (w >= h)
+                    if not correct_orientation:
+                        continue
+
+                    # prefer high-res variants if available
+                    src = getattr(photo, 'src', None) or {}
+                    img_url = None
+                    if isinstance(src, dict):
+                        img_url = src.get('original') or src.get('large2x') or src.get('large') or src.get('medium')
+                    if not img_url:
+                        img_url = getattr(photo, 'large2x', None) or getattr(photo, 'large', None)
+                    if not img_url:
+                        continue
+
+                    fname = os.path.basename(img_url.split('?')[0]) or f"bg_{len(bg_image_paths)}.jpg"
+                    print(f"      - Downloading background: {fname}")
                     img_path = os.path.join(utils.get_script_dir(), "outputs", "tmp", f"bg_{len(bg_image_paths)}.jpg")
                     response = utils.make_request_with_retries(img_url, timeout=60)
-                    if response:
-                        with open(img_path, 'wb') as f: f.write(response.content)
-                        try: Image.open(img_path).verify(); bg_image_paths.append(img_path); found_urls.add(photo.url)
-                        except (IOError, SyntaxError): print(f"      -  WARNING: Downloaded file {img_path} is corrupt. Skipping.")
-        assets['bg_images'] = bg_image_paths; assets['bg_credit'] = "Photos by Pexels" if bg_image_paths else None
-        if not bg_image_paths: print("      -  WARNING: Pexels search returned no suitable images after filtering.")
-    except Exception as e: print(f"      -  WARNING: Pexels API failed: {e}. Continuing with solid color backgrounds.")
+                    if not response:
+                        continue
+                    with open(img_path, 'wb') as f:
+                        f.write(response.content)
+                    try:
+                        Image.open(img_path).verify()
+                        bg_image_paths.append(img_path)
+                        if photo_page_url:
+                            found_urls.add(photo_page_url)
+                    except Exception:
+                        print(f"      -  WARNING: Downloaded file {img_path} is corrupt. Skipping.")
+                    # small sleep to avoid hitting rate limits
+                    time.sleep(0.2)
+
+                page += 1
+
+        assets['bg_images'] = bg_image_paths
+        assets['bg_credit'] = "Photos by Pexels" if bg_image_paths else None
+        if not bg_image_paths:
+            print("      -  WARNING: Pexels search returned no suitable images after filtering.")
+    except Exception as e:
+        print(f"      -  WARNING: Pexels API failed: {e}. Continuing with solid color backgrounds.")
     return assets
 
 # --- STORY SCRIPTS ---
