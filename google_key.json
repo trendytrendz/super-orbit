@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "trendytrendz-480208",
+  "private_key_id": "9045c691f6078e6ed85504330a4aaa79d33cd500",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCusIm1IUssZD/Q\n+S8jXgMvvws38LBlebtfC8Ohmi+7qQpr/3I1b0ny9dpaNdsMaAPnYFDw76yHCGQ4\nDelMtQaefWS1p4vdxH/ok6eCVlIC/CObwbSdzinFD3DgCReuvIVzJlyJbbFsfPr5\nQeYbYukX85f1fS8hOlrq9+oCU6ilX3jDsfMBdGy9cKT9Rsgl52R8XjkLn0htpLOP\nCSVBb61fOHtfPovphi2DRY8Rr6dl3Sbo1MZspKdA9sjhXU7xXtn/KXm+NLUDQY71\n9CdSQy3p57KpKD2AupchTEOm7xeh67Okpcrp5r7zxih5y0wgpaPeuj50c+GMbmyI\n4JgYxyvNAgMBAAECggEAG6XkPa81yyJYuVXfAI1+Gp31hBaLjJv+LFZb0aVqHZzt\nAdfNtyhUf2gq9XElqKqDx6iGVwPP/hU1a2vEO3hBQm9dM6T/bYuOpPxNnELWOxO1\n/Q5k7D73fHFrr4Gw5l5/DpEJP1UFqkKDpFSqOzZl5v0OVXPJNEycnCi9uD2OaRHW\nxfyNHQehw1KRjUvC9sNgYNck0XvREjJ62uTE9zmCsf2XTa+tl3KIlHfnmOUhUguF\nEFz+59a3xbQ5GhoJeDUi6lNTq76C0Wzwn0tke2xnJIKzAGQyCaRDvZDjeUC2FzgH\nTZuOcyWZ6MCwFm9ZLWTH7s1yaAQ96HepoaePzywHXwKBgQDUDnlDgL0l6PdLLfw5\n76TMaQMaNxsWL7LzssvuVN/x+qBbA3d5gqUKw/zxKG9cvh1I4rOZPvqxx+hlmojf\nz3p8LSCXg1Kq3FrY54U5vyKu15XSkvYzTVKdp544dAdyZ3j/7AJ42jviy64Xs5RQ\nO3tGxvEY8fTZkDq/Yki5UD4LAwKBgQDS48LYaLIS/UmiRoQEmroFK8oLLmM74SGq\nZ1LmZCoZXU5vYQwiQY8ohb25khxKIfWrHFQPs5DRo3UprScAXziJa3S503dxQcWm\ndvrsEuB1928lcw0xgj2zEMvYOtXK93yMj+GgG9Vuxo2/LVHbwUfl+D8wW5iKXiuB\nL8ta3zJM7wKBgGqvzXqUrpUAHEqKnDdZxgPBYXoy90G2RcYt0kPaF8FaYornt5g+\njmJYME30FfMHAxzEUa9r7By9gsJ7eRmA/RK0cY1I2LJ1oo82C+T9sKledVY38f3l\njQccaZHlbkm0nT/EsYmz4iU8bB4ojxm+k0sMlAgE0zcSRTw8anIxWMWZAoGAfb99\noVjcReJuE6sEcVJpdUflE8G3Pi9BycAOeH5lc/ZlHJi7iXmaCUmmFY7/+1xAhqU/\nopUp1zcmV5F93gTpS1edpGhpokjbuCTd/gJLgUvnJGd0CH9mlu1+/xImBP6Jb68j\nlDrEi2ctgj9dvjGD06aw1v7m+Cqquj9rfGX2MlUCgYEAz1kFyCxaoyNA9HgtdIBw\n03sYhAemfg8hiZPLzjl4gKrD8ohGmwl60M32PymQl57TVb5MTCJmJ+hLOxKfhY30\nRRFTPhicR4MVEuKLRIlXUsVeWiGHo7luTHTjVEtYMOych+ax/g1i9xTH5cQIPUIp\nvIKB7SQ0LKKsh2QbxHfPA0s=\n-----END PRIVATE KEY-----\n",
+  "client_email": "google-cloud-tts-service@trendytrendz-480208.iam.gserviceaccount.com",
+  "client_id": "111528864094142763288",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/google-cloud-tts-service%40trendytrendz-480208.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
