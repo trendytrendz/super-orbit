@@ -21,8 +21,25 @@ def run_pipeline(args):
     utils.cleanup_temp_images()
     
     theme = random.choice(config.BASE_THEMES)
-    theme['font'] = config.DEFAULT_FONT
-    print(f"✅ Using theme: {theme['accent']} with font {os.path.basename(theme['font'])}")
+
+    # --- STRICT FONT SWITCHING ---
+    if args.lang == 'hi':
+        theme['font'] = config.HINDI_FONT
+        theme['lang'] = 'hi'
+        print(f"✅ Language is Hindi: Using font {os.path.basename(config.HINDI_FONT)}")
+    else:
+        # FIX: Ensure we use the English font for 'en'
+        theme['font'] = config.DEFAULT_FONT
+        theme['lang'] = 'en'
+        print(f"✅ Language is English: Using font {os.path.basename(config.DEFAULT_FONT)}")
+
+    # Safety Check
+    if not os.path.exists(theme['font']) and not theme['font'].startswith("Arial"):
+        print(f"⚠️  Warning: Font file {theme['font']} not found. Falling back to default.")
+        
+        # If English font missing, try to find ANY ttf
+        if args.lang == 'en':
+             theme['font'] = config.DEFAULT_FONT
 
     # 2. Bundle configuration for the story runner
     runner_config = {

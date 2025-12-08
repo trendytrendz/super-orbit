@@ -1,5 +1,5 @@
 # ai_art_director/config.py
-# v24.3.0 - Female Voice & 4 Icons
+# v24.3.17 - Fixed English Font Selection
 
 import os
 import sys
@@ -32,9 +32,20 @@ VIDEO_W_PORTRAIT, VIDEO_H_PORTRAIT = 720, 1280
 BG_COLOR = "#080C14"
 TITLE_SLIDE_DURATION = 3.5
 
-FONT_PATHS = [str(p) for p in FONT_DIR.glob('*.ttf')] if FONT_DIR.exists() else []
-DEFAULT_FONT = FONT_PATHS[0] if FONT_PATHS else "Arial.ttf"
+# --- FONT CONFIG (FIXED) ---
+# 1. Define File Names
+HINDI_FONT_NAME = "NotoSansDevanagari-Bold.ttf"
+ENGLISH_FONT_NAME = "Roboto-Bold.ttf"
 
+# 2. Define Absolute Paths
+HINDI_FONT = str(FONT_DIR / HINDI_FONT_NAME)
+DEFAULT_FONT = str(FONT_DIR / ENGLISH_FONT_NAME) # Strict mapping
+
+# 3. Fallback (Only if file is truly missing, use system Arial)
+if not os.path.exists(DEFAULT_FONT):
+    DEFAULT_FONT = "Arial"
+
+# --- THEMES ---
 BASE_THEMES = [
     {"accent": "#00ACC1", "text": "#F0F4F8", "gradient_end": "#006064"}, 
     {"accent": "#66BB6A", "text": "#E8F5E9", "gradient_end": "#1B5E20"}, 
@@ -45,17 +56,17 @@ def get_chart_size(video_format: str) -> tuple:
     if video_format == 'landscape': return (1100, 550)
     return (680, 500)
 
-# --- VOICE CONFIG (Updated for Female Journey) ---
+# --- VOICE CONFIG ---
 VOICE_CONFIG = {
     "en": {
-        "azure_voice": "en-US-AvaNeural", # Ava is very natural
-        "google_voice": "en-US-Journey-F", # <--- FEMALE JOURNEY VOICE en-IN-Journey-D en-IN-Neural2-A
+        "azure_voice": "en-US-AvaNeural", 
+        "google_voice": "en-US-Journey-F", 
         "gtts_lang": "en", 
         "ssml_prosody": {"rate": "115%", "pitch": "+0%", "volume": "+0%", "style": "friendly"}
     },
     "hi": {
         "azure_voice": "hi-IN-SwaraNeural", 
-        "google_voice": "hi-IN-Neural2-A", # Standard High Quality Female
+        "google_voice": "hi-IN-Neural2-A", 
         "gtts_lang": "hi", 
         "ssml_prosody": {"rate": "115%", "pitch": "+0%", "volume": "+0%", "style": "cheerful"}
     }
@@ -67,13 +78,13 @@ def get_voice_for_lang(lang: str = 'en') -> dict:
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
 AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION")
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
-# True = Google Priority, False = Azure Priority
 DEV_MODE = os.getenv("DEV_MODE", "True").lower() == "true"
 
 MAX_NEWS_ITEMS = 3
-WHISPER_MODEL = "base"
+# Check env for model, default to qwen for codespaces
+WHISPER_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
 
-# --- STORY THEMES (Updated to 4 Icons) ---
+# --- STORY THEMES ---
 STORY_THEMES = {
     "news": {
         "intro_text": "Latest News: {company_name}", 
@@ -83,12 +94,12 @@ STORY_THEMES = {
     "deepdive": {
         "intro_text": "Deep Dive: {company_name}", 
         "cta_text": "Subscribe for more insights!", 
-        "cta_icons": ["like", "subscribe", "comment", "share"] # <--- ADDED 4 ICONS
+        "cta_icons": ["like", "subscribe", "comment", "share"] 
     },
     "comparison": {
         "intro_text": "Comparison Analysis", 
         "cta_text": "Which stock do you prefer? Vote now!", 
-        "cta_icons": ["poll", "like", "comment", "subscribe"]
+        "cta_icons": ["share", "like", "comment", "subscribe"] # Prioritized Share
     },
     "spotlight": {
         "intro_text": "Spotlight: {company_name}", 
@@ -109,7 +120,6 @@ ICONS = {
     "share": """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>"""
 }
 
-# --- Scoring Constants ---
 LOOKBACK_NEWS_DAYS = 7
 IMPACT_KEYWORDS = ['profit', 'loss', 'revenue', 'growth', 'surge', 'plunge', 'record', 'acquisition', 'merger', 'dividend', 'bonus', 'split', 'results', 'quarterly']
 SOURCE_BONUS = {
@@ -120,4 +130,4 @@ SOURCE_BONUS = {
     'Trendlyne Announcements': 15
 }
 
-__version__ = "24.3.0"
+__version__ = "24.3.17"

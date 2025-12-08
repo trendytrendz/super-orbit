@@ -49,8 +49,49 @@ def setup_project_directories():
         except OSError as e:
             # Ignore music dir creation error if user manages it
             if d != config.MUSIC_DIR:
-                print(f"      - ❌ Error creating {d}: {e}")
+                print(f"      - ❌ Error creating {d}: {e}")    
+     # FIX: Download BOTH fonts
+    ensure_fonts()
     print("   ✅ Directories ready.")
+
+def ensure_fonts():
+    """Downloads English (Roboto) and Hindi (Noto) fonts with corruption checks."""
+    
+    # 1. Hindi Font
+    hindi_path = config.FONT_DIR / config.HINDI_FONT_NAME
+    _validate_and_download(
+        "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansDevanagari/NotoSansDevanagari-Bold.ttf",
+        hindi_path,
+        "Hindi"
+    )
+
+    # 2. English Font (Roboto-Bold)
+    # FIX: Updated to correct Static path in Google Fonts repo
+    eng_path = config.FONT_DIR / "Roboto-Bold.ttf"
+    _validate_and_download(
+        "https://github.com/PolymerElements/font-roboto-local/blob/master/fonts/roboto/Roboto-Bold.ttf",
+        eng_path,
+        "English"
+    )
+
+def _validate_and_download(url, path, name):
+    # Check for corruption (0-byte files)
+    if path.exists() and path.stat().st_size < 1000:
+        print(f"   -> ⚠️  Found corrupt {name} font. Deleting...")
+        os.remove(path)
+        
+    if not path.exists():
+        print(f"   -> ⬇️  Downloading {name} Font ({os.path.basename(path)})...")
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            r = requests.get(url, headers=headers, timeout=30)
+            if r.status_code == 200:
+                with open(path, 'wb') as f: f.write(r.content)
+                print(f"      - ✅ Download success.")
+            else:
+                print(f"      - ❌ Failed to download (Status: {r.status_code})")
+        except Exception as e:
+            print(f"      - ❌ Download Error: {e}")
 
 def cleanup_temp_images():
     """Force cleanup of temp images."""
@@ -73,16 +114,16 @@ def now_ist():
 # --- LLM Utilities ---
 
 def query_local_llm(prompt: str, max_words: int = 45, temperature: float = 0.3) -> str | None:
-    """Sends a prompt to a locally running LLM (Ollama)."""
+    """Sends a prompt to a locally running LLM (Ollama:Qwen)."""
     try:
         url = "http://127.0.0.1:11434/api/generate"
         payload = {
-            "model": "llama3:8b",
+            "model": "qwen2.5:3b",
             "prompt": f"Please provide a concise response to: {prompt}",
             "stream": False,
             "options": {"temperature": temperature, "num_predict": max_words * 10}
         }
-        response = requests.post(url, json=payload, timeout=30)
+        response = requests.post(url, json=payload, timeout=120)
         if response.status_code == 200:
             return response.json().get("response", "").strip()
     except requests.exceptions.ConnectionError:
