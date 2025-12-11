@@ -16,12 +16,17 @@ from .story_runners_refactored.news_story import NewsStory
 from .story_runners_refactored.deepdive_story import DeepDiveStory
 from .story_runners_refactored.comparison_story import ComparisonStory
 from .story_runners_refactored.spotlight_story import SpotlightStory
+# NEW IMPORTS
+from .story_runners_refactored.custom_news_story import CustomNewsStory
+from .story_runners_refactored.news_roundup_story import NewsRoundupStory
 
 STORY_RUNNER_MAP = {
     "news": NewsStory,
     "deepdive": DeepDiveStory,
     "comparison": ComparisonStory,
     "spotlight": SpotlightStory,
+    "custom_news": CustomNewsStory,   # <--- Registered
+    "news_roundup": NewsRoundupStory  # <--- Registered
 }
 
 print("✅ Story Runner Factory Initialized")

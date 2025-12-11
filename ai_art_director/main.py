@@ -45,7 +45,8 @@ def run_pipeline(args):
     runner_config = {
         "theme": theme,
         "icon_svg": config.ICONS,
-        "lang": args.lang
+        "lang": args.lang,
+        "input_file": args.input # <--- Pass the input file path here
     }
 
     # 3. Use the Factory to get the correct runner instance
@@ -56,16 +57,28 @@ def run_pipeline(args):
 
     # 4. Determine queries (Fixed Logic)
     queries = []
-    if args.type == 'comparison':
+     # CASE A: Custom News (File Driven)
+    if args.type == 'custom_news':
+        if not args.input:
+            raise VideoGenerationError("Story type 'custom_news' requires --input argument pointing to a JSON file.")
+        
+        # Inject a placeholder query so downstream validation and filename generation don't crash
+        # The CustomNewsStory runner ignores this list anyway.
+        input_filename = os.path.splitext(os.path.basename(args.input))[0]
+        queries = [input_filename] 
+
+    # CASE B: Comparison (Multi-Stock)
+    elif args.type == 'comparison':
         # Prioritize --companies flag, fallback to positional args
         queries = args.companies if args.companies else args.queries
+        
+    # CASE C: Standard Stories (Single Ticker)
     else:
         queries = args.queries
 
-    # Validation
+    # Validation (Global)
     if not queries:
         raise VideoGenerationError(f"No company names provided. Please add company names after the command (e.g. 'Reliance')")
-
     # 5. Output Path
     base_name = "_vs_".join(q.replace(' ', '_') for q in queries)
     out_path = args.out or os.path.join(config.OUTPUT_DIR, f"{base_name}_{args.type}_{args.format}.mp4")
@@ -86,16 +99,16 @@ def run_pipeline(args):
 def main():
     parser = argparse.ArgumentParser(description=f"AI Art Director v{config.__version__}")
     
-    # Positional args (captured as list)
-    parser.add_argument("queries", nargs='*', help="Company names (e.g., 'Reliance' or 'HDFC ICICI')")
-    
-    parser.add_argument("--type", choices=['news', 'deepdive', 'comparison', 'spotlight'], required=True)
+    # Existing args...
+    parser.add_argument("queries", nargs='*', help="Company names")
+    parser.add_argument("--type", choices=['news', 'deepdive', 'comparison', 'spotlight', 'custom_news', 'news_roundup'], required=True) # Added types
     parser.add_argument("--format", choices=['landscape', 'portrait'], default='portrait')
     parser.add_argument("--lang", choices=['en', 'hi'], default='en')
     parser.add_argument("--out", help="Custom output MP4 path.")
+    parser.add_argument("--companies", nargs='+', help="Explicit companies list.")
     
-    # Optional explicit flag for comparison
-    parser.add_argument("--companies", nargs='+', help="Explicit companies list for comparison.")
+    # NEW ARGUMENT
+    parser.add_argument("--input", help="Path to JSON file for Custom News")
     
     args = parser.parse_args()
 

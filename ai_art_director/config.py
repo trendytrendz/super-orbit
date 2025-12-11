@@ -105,6 +105,20 @@ STORY_THEMES = {
         "intro_text": "Spotlight: {company_name}", 
         "cta_text": "Want more spotlights? Subscribe!", 
         "cta_icons": ["like", "subscribe", "bell", "share"]
+    },
+    
+    # NEW: Custom News (Same as News but maybe different styling?)
+    "custom_news": {
+        "intro_text": "Exclusive Update: {company_name}", 
+        "cta_text": "Follow for detailed analysis!", 
+        "cta_icons": ["bell", "like", "subscribe", "share"]
+    },
+    
+    # NEW: News Roundup
+    "news_roundup": {
+        "intro_text": "Market Roundup: Top Stories", 
+        "cta_text": "Which stock are you tracking? Comment below!", 
+        "cta_icons": ["comment", "like", "share", "subscribe"]
     }
 }
 

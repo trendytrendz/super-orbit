@@ -11,6 +11,50 @@ from typing import Dict, List, Any
 from . import utils
 from . import config
 
+def build_custom_news_script(data):
+    """Builds script from user JSON. Trusts the user's structure."""
+    script = {}
+    
+    # Use LLM to spice up the intro if desired, or just read it.
+    company = data.get('company_name')
+    script['intro'] = f"Important update for {company}. Here is what you need to know."
+    
+    for i, item in enumerate(data.get('news_items', [])):
+        # We ask LLM to make it conversational but keep facts
+        raw_text = item['title']
+        context = f"News: {raw_text}. Company: {company}"
+        # "Make it punchy for video"
+        script[f'news_{i+1}'] = utils.generate_plain_text_script(context, "Rewrite this headline as a spoken sentence.")
+    
+    script['cta'] = "Follow for more updates."
+    return script
+
+def build_roundup_script(roundup_data):
+    """
+    Builds a tight script for multiple stocks.
+    Constraint: Keep it short per stock.
+    """
+    script = {}
+    
+    # Intro
+    companies_text = ", ".join([d['display'] for d in roundup_data])
+    script['intro'] = f"Today's Market Roundup. We are tracking big moves in {companies_text}."
+    
+    # Per Stock
+    for i, item in enumerate(roundup_data):
+        stock = item['display']
+        if item['news']:
+            headline = item['news'][0]['title']
+            # Prompt for brevity
+            prompt = f"Stock: {stock}. News: {headline}. Write ONE short, punchy sentence (max 15 words)."
+            script[f'stock_{i}'] = utils.query_local_llm(prompt, max_words=20)
+        else:
+            script[f'stock_{i}'] = f"No major headlines for {stock} today, but watch the levels."
+            
+    script['cta'] = "Which of these are you buying? Let us know in the comments."
+    return script
+
+
 def build_hindi_narration_directly(company_data, story_type):
     """Generate Hindi narration directly using Ollama"""
     try:
