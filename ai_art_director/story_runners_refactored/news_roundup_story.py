@@ -1,5 +1,5 @@
-# story_runners_refactored/news_roundup_story.py
-# v25.1.0 - Multi-Stock Rapid Fire
+# ai_art_director/story_runners_refactored/news_roundup_story.py
+# v25.5.0 - Logging & Intro Headlines
 
 import random
 from typing import Dict, List, Any
@@ -27,27 +27,48 @@ class NewsRoundupStory(BaseStory):
         try:
             roundup_data = []
             
-            # 1. Fetch Data for all stocks
+            # 1. Fetch Data
             for q in queries:
                 print(f"   -> Fetching news for {q}...")
                 nse, y_sym, disp = data_fetcher.resolve_symbol(q)
                 
-                # Fetch News & Price
-                news = data_fetcher.fetch_yfinance_news(y_sym) + data_fetcher.fetch_google_news(disp, nse, days=3)
+                # --- NEW: Fetch from ALL sources ---
+                # 1. Yahoo
+                n1 = data_fetcher.fetch_yfinance_news(y_sym)
+                # 2. Google
+                n2 = data_fetcher.fetch_google_news(disp, nse, days=3)
+                # 3. MoneyControl
+                n3 = data_fetcher.fetch_moneycontrol_news(disp)
+                # 4. Economic Times
+                n4 = data_fetcher.fetch_economic_times_news(disp)
                 
-                # Sort by freshness and relevance
-                # Simple dedupe
+                # Combine
+                all_news = n1 + n2 + n3 + n4
+                
+                # --- NEW: Sorting Logic (Freshness First) ---
+                # Sort by 'published' date descending (Newest first)
+                all_news.sort(key=lambda x: x['published'], reverse=True)
+                
+                # Dedupe (Keep the newest version if duplicate titles exist)
                 unique_news = []
-                seen_titles = set()
-                for n in news:
-                    if n['title'] not in seen_titles:
+                seen = set()
+                for n in all_news:
+                    if n['title'] not in seen:
                         unique_news.append(n)
-                        seen_titles.add(n['title'])
+                        seen.add(n['title'])
                 
-                # Take top 2 most recent/relevant
-                top_news = unique_news[:2]
+                # Filter Top Story
+                top_news = unique_news[:2] 
                 
-                # Logo
+                # LOGGING
+                if top_news:
+                    print(f"      ★ Selected Story 1 ({top_news[0]['source']}): {top_news[0]['title']}")
+                    if len(top_news) > 1:
+                        print(f"      ★ Selected Story 2 ({top_news[1]['source']}): {top_news[1]['title']}")
+                else:
+                    print(f"      ⚠️ No news found for {q}")
+
+                # Fetch Logo
                 logo = data_fetcher.fetch_company_logo(y_sym)
                 
                 roundup_data.append({
@@ -58,43 +79,73 @@ class NewsRoundupStory(BaseStory):
             
             # 2. Build Slides
             slides = []
-            
-            # Slide 1: Agenda (Grid of Companies) - Reuse Comparison Intro Logic!
             all_logos = [d['logo'] for d in roundup_data]
             all_names = [d['display'] for d in roundup_data]
             
+            # Extract headlines for Intro Card
+            all_headlines = []
+            for d in roundup_data:
+                if d['news']:
+                    all_headlines.append(d['news'][0]['title'])
+                else:
+                    all_headlines.append("No major updates today.")
+
+            # Slide 1: Intro (Grid)
             slides.append({
-                'type': 'intro', # Will use the Card Grid we built!
+                'type': 'intro',
                 'key': 'intro',
                 'text': "Market Roundup",
                 'logos': all_logos,
-                'names': all_names
+                'names': all_names,
+                'headlines': all_headlines # Passing Headlines for Intro Grid
             })
             
-            # Slide 2..N: News Items
-            # Strategy: 1 Slide per Stock containing the best headline
-            for i, item in enumerate(roundup_data):
+            # Slide 2..N: Glass Cards
+            # Slide 2..N: Glass Cards (Nested Loop)
+            # Strategy: Create 1 slide per news item
+            
+            slide_counter = 0
+            for item in roundup_data:
+                company_name = item['display']
+                company_logo = item['logo']
+                
                 if item['news']:
-                    headline = item['news'][0]['title']
+                    # Iterate through available news (up to 2)
+                    for news_item in item['news']:
+                        headline = news_item['title']
+                        source_name = news_item.get('source', 'News')
+                        
+                        slides.append({
+                            'type': 'glass_news', 
+                            'key': f'news_{slide_counter}',
+                            'company': company_name,
+                            'logo': company_logo,
+                            'text': headline,
+                            'source': source_name
+                        })
+                        slide_counter += 1
+                else:
+                    # Fallback if NO news found for a stock (Rare but possible)
                     slides.append({
-                        'type': 'news',
-                        'key': f'stock_{i}',
-                        'text': f"{item['display']}\n\n{headline}", # Stack Name + News
-                        'icon': utils.classify_impact(headline)
+                        'type': 'glass_news',
+                        'key': f'news_{slide_counter}',
+                        'company': company_name,
+                        'logo': company_logo,
+                        'text': "No major headlines today.",
+                        'source': "Market Data"
                     })
+                    slide_counter += 1
             
             # Slide Last: CTA
             slides.append({'type': 'cta', 'key': 'cta'})
             
             # 3. Assets
-            # We need general "Stock Market" backgrounds
             assets = self.background_manager.fetch_contextual_backgrounds(
                 "Stock Market", "Financial News", len(slides), video_format
             )
-            # Pass logos for the intro slide
             assets['logos'] = all_logos
             
-            # 4. Narration (The Constraints Part)
+            # 4. Narration
             english_script = narration_builder.build_roundup_script(roundup_data)
             audio_script = narration_builder.build_audio_script(english_script, self.lang)
             audio_paths = self.audio_generator.generate_segmented_voiceover(audio_script, self.lang)

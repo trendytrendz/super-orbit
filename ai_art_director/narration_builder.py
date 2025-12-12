@@ -31,8 +31,7 @@ def build_custom_news_script(data):
 
 def build_roundup_script(roundup_data):
     """
-    Builds a tight script for multiple stocks.
-    Constraint: Keep it short per stock.
+    Builds script for multiple stocks, handling multiple news items per stock.
     """
     script = {}
     
@@ -40,16 +39,24 @@ def build_roundup_script(roundup_data):
     companies_text = ", ".join([d['display'] for d in roundup_data])
     script['intro'] = f"Today's Market Roundup. We are tracking big moves in {companies_text}."
     
-    # Per Stock
-    for i, item in enumerate(roundup_data):
+    # Per News Item
+    slide_counter = 0
+    for item in roundup_data:
         stock = item['display']
+        
         if item['news']:
-            headline = item['news'][0]['title']
-            # Prompt for brevity
-            prompt = f"Stock: {stock}. News: {headline}. Write ONE short, punchy sentence (max 15 words)."
-            script[f'stock_{i}'] = utils.query_local_llm(prompt, max_words=20)
+            for news_item in item['news']:
+                headline = news_item['title']
+                
+                # Prompt: "Stock: Tata Motors. News: [Headline]. Write ONE sentence."
+                prompt = f"Stock: {stock}. News: {headline}. Write ONE short, spoken sentence (max 15 words)."
+                
+                # Generate unique key matching the slide key
+                script[f'news_{slide_counter}'] = utils.query_local_llm(prompt, max_words=20)
+                slide_counter += 1
         else:
-            script[f'stock_{i}'] = f"No major headlines for {stock} today, but watch the levels."
+            script[f'news_{slide_counter}'] = f"No major headlines for {stock} today."
+            slide_counter += 1
             
     script['cta'] = "Which of these are you buying? Let us know in the comments."
     return script

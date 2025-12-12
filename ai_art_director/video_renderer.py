@@ -13,7 +13,7 @@ from . import config
 from . import utils
 from . import visual_elements
 
-def _create_subtitle_clip_pil(text, duration, size):
+def _create_subtitle_clip_pil(text, duration, size, font_path):
     """Creates subtitles using PIL (bypasses ImageMagick)."""
     if not text: return None
     W, H = size
@@ -22,7 +22,7 @@ def _create_subtitle_clip_pil(text, duration, size):
     draw = ImageDraw.Draw(img)
     
     font_size = 32 if W < H else 40
-    font = visual_elements.load_font(config.DEFAULT_FONT, font_size)
+    font = visual_elements.load_font(font_path, font_size)
     
     clean_text = text.replace('\n', ' ').strip()
     if len(clean_text) > 160: clean_text = clean_text[:157] + "..."
@@ -119,6 +119,9 @@ def make_video(slides, audio_paths, company, story_type, video_format, out_path,
             if st == 'intro':
                 fg = visual_elements.render_intro_slide(slide_info, story_type, assets, theme, duration, size)
                 fg = visual_elements.apply_random_animation(fg, 0, duration, size)
+            # --- NEW ENTRY ---
+            elif st == 'glass_news':
+                fg = visual_elements.render_glass_news_slide(slide_info, theme, duration, size)
             elif st == 'sector': fg = visual_elements.render_sector_slide(slide_info, theme, duration, size)
             elif st == 'management': fg = visual_elements.render_management_slide(slide_info, theme, duration, size)
             elif st == 'cta': 
@@ -133,7 +136,7 @@ def make_video(slides, audio_paths, company, story_type, video_format, out_path,
         # SUBTITLES
         txt = slide_info.get('script_text', '') or (slide_info['text'] if len(slide_info.get('text','')) > 50 else "")
         if txt:
-            sub = _create_subtitle_clip_pil(txt, duration, size)
+            sub = _create_subtitle_clip_pil(txt, duration, size, font_path=theme['font'])
             if sub: layers.append(sub)
 
         # COMPOSITE

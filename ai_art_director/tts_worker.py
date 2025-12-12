@@ -61,7 +61,7 @@ def try_google(text, output_path, lang, voice_name):
     if not GOOGLE_AVAILABLE: return False
     if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"): return False
 
-    print(f">> DEBUG: Trying Google Cloud ({voice_name})...")
+    #print(f">> DEBUG: Trying Google Cloud ({voice_name})...")
     try:
         client = texttospeech.TextToSpeechClient()
         clean_text = clean_ssml_for_google(text)

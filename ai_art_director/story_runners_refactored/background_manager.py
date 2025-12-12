@@ -1,5 +1,5 @@
 # story_runners_refactored/background_manager.py
-# v24.2.25 - Absolute Path Fix & Direct API
+# v25.2.0 - Fixed: Randomize Pexels Images per Run
 
 import os
 import random
@@ -26,17 +26,23 @@ class BackgroundManager:
         Saves files to the absolute config.TMP_IMG_DIR.
         """
         # 1. Define Keywords
-        keywords = [
+        # We shuffle these base keywords so we don't always start with "finance"
+        base_keywords = [
             "finance", "technology", "abstract", "business", 
-            "cityscape", "network", "stock market", "skyscraper"
+            "cityscape", "network", "stock market", "skyscraper",
+            "modern office", "chart", "growth", "money"
         ]
+        random.shuffle(base_keywords)
         
+        keywords = []
         if specific_queries:
-            keywords = specific_queries + keywords
+            keywords.extend(specific_queries)
+        
+        keywords.extend(base_keywords)
 
         # 2. Attempt Fetch
         if self.has_valid_key:
-            print(f"\n   -> Fetching {num_needed} backgrounds (Absolute Path)...")
+            print(f"\n   -> Fetching {num_needed} unique backgrounds...")
             images = self._search_images_direct(keywords, num_needed, video_format)
             
             if images and len(images) >= 1:
@@ -59,17 +65,31 @@ class BackgroundManager:
         orientation = 'portrait' if video_format == 'portrait' else 'landscape'
         headers = {'Authorization': self.api_key}
         
+        # Track what we've downloaded to avoid duplicates in this run
+        seen_urls = set()
+
         for q in keywords:
             if len(paths) >= max_images: break
             
             try:
-                print(f"      - 🔎 Searching: '{q}'")
+                # FIX 1: Randomize the Page Number (1-10) to get deep results
+                # But for very specific queries (like company name), stick to page 1 first
+                page_num = 1
+                if q not in ["finance", "business"]: 
+                    # specific queries: try page 1 first
+                    page_num = 1
+                else:
+                    # generic queries: randomize heavily
+                    page_num = random.randint(1, 10)
+
+                print(f"      - 🔎 Searching: '{q}' (Page {page_num})")
                 url = "https://api.pexels.com/v1/search"
                 params = {
                     'query': q,
-                    'per_page': 15,
+                    'per_page': 20, # Fetch more than needed
                     'orientation': orientation,
-                    'size': 'large'
+                    'size': 'large',
+                    'page': page_num
                 }
                 
                 response = requests.get(url, headers=headers, params=params, timeout=10)
@@ -80,31 +100,41 @@ class BackgroundManager:
                     break
                 
                 if response.status_code != 200:
-                    print(f"      - ⚠️ API Status: {response.status_code}")
-                    continue
+                    # If random page was too high (e.g. Page 10 of empty results), retry Page 1
+                    if page_num > 1:
+                        params['page'] = 1
+                        response = requests.get(url, headers=headers, params=params, timeout=10)
+                        if response.status_code != 200: continue
+                    else:
+                        continue
                     
                 data = response.json()
                 photos = data.get('photos', [])
                 
                 if not photos: continue
                 
+                # FIX 2: Shuffle the results from this page
+                random.shuffle(photos)
+                
                 for photo in photos:
                     if len(paths) >= max_images: break
                     
                     img_url = photo['src']['large2x']
                     
-                    # CRITICAL FIX: Construct Absolute Path
+                    if img_url in seen_urls: continue
+                    seen_urls.add(img_url)
+                    
+                    # Create unique filename with random ID to prevent overwriting
                     clean_q = "".join(x for x in q if x.isalnum())
-                    filename = f"bg_{len(paths)}_{clean_q}.jpg"
+                    # Using random.randint ensures filename is different even for same query
+                    filename = f"bg_{clean_q}_{random.randint(1000, 9999)}.jpg"
                     save_path = os.path.join(self.tmp_dir, filename)
                     
-                    # Avoid re-downloading if exists
-                    if os.path.exists(save_path) and os.path.getsize(save_path) > 1024:
-                        paths.append(save_path)
-                        continue
-
                     if self._download(img_url, save_path):
                         paths.append(save_path)
+                        # Only take 1 or 2 photos per keyword to ensure variety
+                        if len(paths) % 2 == 0: 
+                            break 
                                 
             except Exception as e:
                 print(f"      - ⚠️ Search Error for '{q}': {e}") 
@@ -135,11 +165,11 @@ class BackgroundManager:
                 ("#232526", "#414345", "#414345"), # Midnight
                 ("#1A2980", "#26D0CE", "#26D0CE")  # Aqua
             ]
+            random.shuffle(schemes) # Shuffle schemes too
             
             for i in range(num_needed):
                 colors = schemes[i % len(schemes)]
                 
-                # CRITICAL FIX: Construct Absolute Path
                 filename = f"fallback_{i}_{random.randint(0,9999)}.jpg"
                 p = os.path.join(self.tmp_dir, filename)
                 

@@ -106,10 +106,10 @@ class AudioGenerator:
             
             if result.returncode == 0:
                 if os.path.exists(output_path) and os.path.getsize(output_path) > 500:
-                    print(result.stdout)
-                    print("--- WORKER STDERR ---")
+                    #print(result.stdout)
+                    #print("--- WORKER STDERR ---")
                     print(result.stderr)
-                    print("---------------------")
+                    #print("---------------------")
                     return True
                 else:
                     print(f"      - ❌ Voiceover file invalid/small: {output_path}")

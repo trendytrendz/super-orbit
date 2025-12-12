@@ -95,14 +95,20 @@ class DeepDiveStory(BaseStory):
             quarterly_financials = data_fetcher.fetch_quarterly_financials(y_symbol)
             price_data, _ = data_fetcher.fetch_price_data(y_symbol)
             logo = data_fetcher.fetch_company_logo(y_symbol)
-            
+
+            # Logic: Try TickerTape sector first, if missing, use Yahoo Finance sector
+            sector = tt_data.get('sector')
+            if not sector:
+                sector = yfinance_details.get('sector', 'N/A')
+
             combined_metrics = {**yfinance_details, **tt_data.get('metrics', {})}
             details = {
                 'name': display,
                 'summary': tt_data.get('profile'),
                 'ceo': yfinance_details.get('ceo'),
                 'peers': list(tt_data.get('peers', {}).keys()) if tt_data.get('peers') else [],
-                'sector': tt_data.get('sector')
+                #'sector': tt_data.get('sector')
+                'sector': sector, # <--- UPDATED
             }
             
             return {
