@@ -15,10 +15,45 @@ from . import utils
 
 # --- HELPER FUNCTIONS ---
 def load_font(path, size):
-    try: return ImageFont.truetype(path, size)
-    except OSError:
-        try: return ImageFont.truetype("Arial", size)
-        except: return ImageFont.load_default()
+    """
+    Robust font loader that handles Linux/Codespaces missing fonts.
+    Prioritizes:
+    1. The specific asset path (Roboto/Noto)
+    2. Common Linux fonts (DejaVu, Liberation) - CRITICAL FOR CODESPACES
+    3. System Arial (Windows/Mac)
+    4. Default (Last resort)
+    """
+    # 1. Try specific asset path
+    try: 
+        return ImageFont.truetype(str(path), size)
+    except (OSError, IOError):
+        pass # Fall through
+        
+    # 2. Try Standard Linux Fonts (Codespaces/Docker)
+    linux_fallbacks = [
+        "DejaVuSans.ttf",
+        "LiberationSans-Regular.ttf",
+        "FreeSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
+    ]
+    
+    for font_name in linux_fallbacks:
+        try:
+            return ImageFont.truetype(font_name, size)
+        except (OSError, IOError):
+            continue
+
+    # 3. Try System Arial (Windows/Mac)
+    try: 
+        return ImageFont.truetype("Arial", size)
+    except (OSError, IOError):
+        pass
+
+    # 4. Total Failure (Print Warning)
+    print(f"      ⚠️  WARNING: Could not load ANY font. Using tiny default bitmap.")
+    return ImageFont.load_default()
+
 
 def apply_random_animation(clip, start_time, slide_duration, size):
     return clip.set_start(start_time).set_duration(slide_duration).fadein(0.5)
