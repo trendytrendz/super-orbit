@@ -17,24 +17,21 @@ sudo apt install -y libjpeg-dev zlib1g-dev libfreetype6-dev libpng-dev
 # FFmpeg (required by moviepy, imageio-ffmpeg)
 sudo apt install -y ffmpeg
 
-echo "=== Creating virtual environment ==="
-if [ ! -d ".venv" ]; then
-    python3 -m venv .venv
-fi
-
-echo "=== Activating virtual environment ==="
-source .venv/bin/activate
+//once we installed this we need to change the policy.xml
+// sudo nano /etc/ImageMagick-6/policy.xml
+// need to change policy error 
+// <policy domain="path" rights="read|write" pattern="@*"/>
+sudo apt-get install -y imagemagick 
 
 echo "=== Upgrading pip and setuptools ==="
 pip install --upgrade pip setuptools wheel
 
 echo "=== Installing Python requirements ==="
-if [ -f requirementsGemini1.txt ]; then
-    pip install -r requirementsGemini1.txt
+if [ -f requirement.txt ]; then
+    pip install -r requirement.txt
 else
-    echo "requirementsGemini1.txt not found!"
+    echo "requirement.txt not found!"
     exit 1
 fi
 
 echo "=== Setup completed successfully! ==="
-echo "Activate the venv with: source .venv/bin/activate"

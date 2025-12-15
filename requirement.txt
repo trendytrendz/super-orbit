@@ -68,3 +68,6 @@ urllib3==2.5.0
 webcolors==24.11.1
 websockets==15.0.1
 yfinance==0.2.66
+mplfinance
+scipy
+cairosvg
