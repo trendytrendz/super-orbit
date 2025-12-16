@@ -1,5 +1,5 @@
 # ai_art_director/utils.py
-# v24.3.2 - Consolidated & Fixed
+# v25.8.0 - RESTORED FULL UTILITY BELT
 
 import os
 import shutil
@@ -11,7 +11,7 @@ from difflib import SequenceMatcher
 from typing import List
 from . import config
 
-# Graceful third-party imports
+# Graceful imports
 try:
     from PIL import Image, ImageDraw, ImageFont
     PIL_AVAILABLE = True
@@ -24,176 +24,107 @@ try:
 except ImportError:
     FAKE_USERAGENT_AVAILABLE = False
 
-# --- Path & Directory Utilities ---
-
-def get_script_dir() -> str:
-    return str(config.SRC_DIR)
-
+# --- Directory Utils ---
 def setup_project_directories():
-    """Ensures all absolute output directories exist."""
-    print(f"   -> Validating absolute paths...")
-    dirs_to_create = [
-        config.OUTPUT_DIR,
-        config.TMP_DIR,
-        config.AUDIO_VOICEOVERS_DIR,
-        config.AUDIO_CACHE_DIR,
-        config.AUDIO_FALLBACKS_DIR,
-        config.TMP_IMG_DIR,
-        config.MUSIC_DIR,
-        config.FONT_DIR,
+    dirs = [
+        config.OUTPUT_DIR, config.TMP_DIR, config.AUDIO_VOICEOVERS_DIR,
+        config.AUDIO_CACHE_DIR, config.AUDIO_FALLBACKS_DIR,
+        config.TMP_IMG_DIR, config.MUSIC_DIR, config.FONT_DIR,
         config.FALLBACK_BACKGROUND_DIR,
     ]
-    for d in dirs_to_create:
-        try:
-            os.makedirs(d, exist_ok=True)
-        except OSError as e:
-            # Ignore music dir creation error if user manages it
-            if d != config.MUSIC_DIR:
-                print(f"      - ❌ Error creating {d}: {e}")    
-     # FIX: Download BOTH fonts
+    for d in dirs: os.makedirs(d, exist_ok=True)
     ensure_fonts()
-    print("   ✅ Directories ready.")
 
 def ensure_fonts():
-    """Downloads English (Roboto) and Hindi (Noto) fonts with corruption checks."""
-    
     # 1. Hindi Font
-    hindi_path = config.FONT_DIR / config.HINDI_FONT_NAME
-    _validate_and_download(
-        "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansDevanagari/NotoSansDevanagari-Bold.ttf",
-        hindi_path,
-        "Hindi"
-    )
-
-    # 2. English Font (Roboto-Bold)
-    # FIX: Updated to correct Static path in Google Fonts repo
-    eng_path = config.FONT_DIR / "Roboto-Bold.ttf"
-    _validate_and_download(
-        "https://github.com/PolymerElements/font-roboto-local/blob/master/fonts/roboto/Roboto-Bold.ttf",
-        eng_path,
-        "English"
-    )
+    _validate_and_download("https://github.com/google/fonts/raw/main/ofl/notosansdevanagari/NotoSansDevanagari-Bold.ttf", config.FONT_DIR / config.HINDI_FONT_NAME, "Hindi")
+    # 2. English Font
+    _validate_and_download("https://github.com/google/fonts/raw/main/apache/roboto/Roboto-Bold.ttf", config.FONT_DIR / "Roboto-Bold.ttf", "English")
 
 def _validate_and_download(url, path, name):
-    # Check for corruption (0-byte files)
-    if path.exists() and path.stat().st_size < 1000:
-        print(f"   -> ⚠️  Found corrupt {name} font. Deleting...")
-        os.remove(path)
-        
-    if not path.exists():
-        print(f"   -> ⬇️  Downloading {name} Font ({os.path.basename(path)})...")
+    if path.exists():
         try:
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            r = requests.get(url, headers=headers, timeout=30)
-            if r.status_code == 200:
+            with open(path, 'rb') as f:
+                if b'<!DOCTYPE' in f.read(20): os.remove(path)
+                elif path.stat().st_size < 1000: os.remove(path)
+        except: pass
+    if not path.exists():
+        print(f"   -> ⬇️  Downloading {name} Font...")
+        try:
+            r = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=30)
+            if r.status_code == 200 and b'<!DOCTYPE' not in r.content[:20]:
                 with open(path, 'wb') as f: f.write(r.content)
-                print(f"      - ✅ Download success.")
-            else:
-                print(f"      - ❌ Failed to download (Status: {r.status_code})")
-        except Exception as e:
-            print(f"      - ❌ Download Error: {e}")
+        except: pass
 
 def cleanup_temp_images():
-    """Force cleanup of temp images."""
     try:
-        if os.path.exists(config.TMP_IMG_DIR):
-            shutil.rmtree(config.TMP_IMG_DIR)
+        if os.path.exists(config.TMP_IMG_DIR): shutil.rmtree(config.TMP_IMG_DIR)
         os.makedirs(config.TMP_IMG_DIR, exist_ok=True)
-    except Exception as e:
-        print(f"   -> ⚠️ Cleanup error: {e}")
+    except: pass
 
-def ensure_dirs():
-    setup_project_directories()
+def get_script_dir(): return str(config.SRC_DIR)
 
-# --- Time Utilities ---
+# --- LLM Utils ---
+def now_ist(): return datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
 
-def now_ist():
-    """Returns current time in Indian Standard Time (UTC+5:30)"""
-    return datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
-
-# --- LLM Utilities ---
-
-def query_local_llm(prompt: str, max_words: int = 45, temperature: float = 0.3) -> str | None:
-    """Sends a prompt to a locally running LLM (Ollama:Qwen)."""
+def query_local_llm(prompt, max_words=45, temperature=0.3):
     try:
         url = "http://127.0.0.1:11434/api/generate"
-        payload = {
-            "model": "qwen2.5:3b",
-            "prompt": f"Please provide a concise response to: {prompt}",
-            "stream": False,
-            "options": {"temperature": temperature, "num_predict": max_words * 10}
-        }
-        response = requests.post(url, json=payload, timeout=120)
-        if response.status_code == 200:
-            return response.json().get("response", "").strip()
-    except requests.exceptions.ConnectionError:
-        print("      - ❌ Connection Error: Ensure Ollama is running")
-    except Exception as e:
-        print(f"      - ❌ LLM Error: {e}")
+        payload = {"model": config.WHISPER_MODEL, "prompt": f"Response: {prompt}", "stream": False, "options": {"temperature": temperature, "num_predict": max_words * 10}}
+        r = requests.post(url, json=payload, timeout=120)
+        if r.status_code == 200: return r.json().get("response", "").strip()
+    except: pass
     return None
 
-def query_local_llm_improved(prompt: str, max_words: int = 45, temperature: float = 0.3) -> str | None:
-    """Wrapper for improved query (currently same implementation)."""
-    return query_local_llm(prompt, max_words, temperature)
+def query_local_llm_improved(prompt, max_words=45, temperature=0.3): return query_local_llm(prompt, max_words, temperature)
 
-def generate_plain_text_script(context: str, instruction: str) -> str | None:
-    prompt = f"Data: {context}. Instruction: {instruction}. Respond with one engaging sentence in plain text."
-    script = query_local_llm(prompt, max_words=35)
-    return script.strip() if script else None
+def generate_plain_text_script(context, instruction):
+    return query_local_llm(f"Data: {context}. Instruction: {instruction}. One plain sentence.", max_words=35)
 
-def get_llm_search_terms(company_name: str, business_summary: str) -> List[str]:
-    prompt = f"Generate 5 comma-separated search keywords for background images for a video about {company_name}. Business: {business_summary[:100]}. No people."
-    response = query_local_llm(prompt, max_words=20)
-    if response:
-        keywords = [k.strip().strip('"').strip("'") for k in response.split(',')]
-        return [k for k in keywords if len(k) > 2][:5]
-    return ["business", "finance", "abstract"]
+def get_llm_search_terms(company_name, summary):
+    res = query_local_llm(f"5 search keywords for background images about {company_name}. Business: {summary}. No people.", max_words=20)
+    if res: return [k.strip("'\" ") for k in res.split(',') if len(k) > 2][:5]
+    return ["business", "finance"]
 
-# --- Text Utilities ---
+# --- Text & Logic Utils (RESTORED) ---
+def create_ssml(text, lang='en'):
+    vc = config.get_voice_for_lang(lang); p = vc["ssml_prosody"]
+    return f"""<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="{lang}"><voice name="{vc['azure_voice']}"><express-as style="{p['style']}"><prosody rate="{p['rate']}" pitch="{p['pitch']}" volume="{p['volume']}">{text}</prosody></express-as></voice></speak>"""
 
-def create_ssml(text: str, lang: str = 'en') -> str:
-    voice_conf = config.get_voice_for_lang(lang)
-    prosody = voice_conf["ssml_prosody"]
-    ssml = f"""<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="{lang}"><voice name="{voice_conf['azure_voice']}"><express-as style="{prosody['style']}"><prosody rate="{prosody['rate']}" pitch="{prosody['pitch']}" volume="{prosody['volume']}">{text}</prosody></express-as></voice></speak>"""
-    return " ".join(ssml.strip().split())
+def seq_ratio(a, b): return SequenceMatcher(None, (a or "").lower(), (b or "").lower()).ratio()
 
-def seq_ratio(a: str, b: str) -> float:
-    return SequenceMatcher(None, (a or "").lower(), (b or "").lower()).ratio()
-
-def classify_impact(text: str) -> str:
-    text_lower = text.lower()
-    pos = sum(1 for w in ['profit', 'growth', 'gain', 'rise', 'up', 'positive', 'beat', 'surge'] if w in text_lower)
-    neg = sum(1 for w in ['loss', 'fall', 'drop', 'down', 'negative', 'miss', 'decline', 'cut'] if w in text_lower)
+def classify_impact(text):
+    t = text.lower()
+    pos = sum(1 for w in ['profit', 'growth', 'gain', 'rise', 'up', 'positive', 'beat', 'surge'] if w in t)
+    neg = sum(1 for w in ['loss', 'fall', 'drop', 'down', 'negative', 'miss', 'decline', 'cut'] if w in t)
     return "positive" if pos > neg else "negative" if neg > pos else "neutral"
 
-def make_request_with_retries(url: str, headers: dict = None, retries: int = 3, delay: int = 2, timeout: int = 30) -> requests.Response | None:
+def make_request_with_retries(url, headers=None, retries=3, delay=2, timeout=30):
     for _ in range(retries):
         try:
-            r = requests.get(url, headers=headers or {}, timeout=timeout)
+            r = requests.get(url, headers=headers or {'User-Agent': 'Mozilla/5.0'}, timeout=timeout)
             if r.status_code == 200: return r
         except: time.sleep(delay)
     return None
 
-# --- Image/Font Utilities ---
-
-def get_optimal_font(text: str, initial_size: int, max_w: int, max_h: int, font_path: str):
-    return get_optimal_font_size(text, initial_size, max_w, max_h, font_path)
-
+# --- VISUAL UTILS (RESTORED FOR COMPATIBILITY) ---
 def get_optimal_font_size(text, initial_size, max_w, max_h, font_path):
     if not PIL_AVAILABLE: return None
     font_size = initial_size
     while font_size > 18:
         try:
-            font = ImageFont.truetype(font_path, font_size)
-            bbox = font.getbbox(text) if hasattr(font, 'getbbox') else font.getmask(text).getbbox()
+            font = ImageFont.truetype(str(font_path), font_size)
+            if hasattr(font, 'getbbox'): bbox = font.getbbox(text)
+            else: bbox = font.getmask(text).getbbox()
             w = bbox[2] - bbox[0] if bbox else font.getlength(text)
             h = bbox[3] - bbox[1] if bbox else font.size
             if w <= max_w and h <= max_h: return font
         except: pass
         font_size -= 2
-    return ImageFont.truetype(font_path, 18)
+    return ImageFont.load_default()
 
 def wrap_text_pil(text, font, max_width):
+    """Wraps text to fit width. Restored to utils.py to fix Video Renderer crash."""
     if not text: return []
     words = text.split()
     lines, current_line = [], []
@@ -209,6 +140,3 @@ def wrap_text_pil(text, font, max_width):
 
 def draw_gradient_text(draw, text, font, position, color1, color2):
     draw.text(position, text, font=font, fill=color1)
-
-def create_gradient_image(size, color1, color2, direction='horizontal'):
-    return None

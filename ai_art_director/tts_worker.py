@@ -6,6 +6,12 @@ import os
 import sys
 import re
 from gtts import gTTS
+try:
+    from pydub import AudioSegment
+    PYDUB_AVAILABLE = True
+except ImportError:
+    PYDUB_AVAILABLE = False
+
 
 # --- 1. Azure Import ---
 try:
@@ -97,16 +103,75 @@ def try_google(text, output_path, lang, voice_name):
         print(f">> DEBUG: Google Error: {e}", file=sys.stderr)
     return False
 
+def speed_up_mp3(input_path, speed=1.25):
+    """Speed up audio using pydub (reliable) or ffmpeg (fallback)"""
+    
+    # METHOD 1: Pydub (Preferred)
+    if PYDUB_AVAILABLE:
+        try:
+            sound = AudioSegment.from_mp3(input_path)
+            
+            # Pydub doesn't have direct 'speed' change without pitch shift
+            # But we can cheat by changing frame rate
+            new_sample_rate = int(sound.frame_rate * speed)
+            faster_sound = sound._spawn(sound.raw_data, overrides={'frame_rate': new_sample_rate})
+            faster_sound = faster_sound.set_frame_rate(44100) # Reset to standard
+            
+            faster_sound.export(input_path, format="mp3")
+            print(f">> DEBUG: Speed up ({speed}x) applied via Pydub.")
+            return True
+        except Exception as e:
+            print(f">> DEBUG: Pydub failed: {e}")
+
+    # METHOD 2: FFmpeg (Fallback)
+    # Ensure command is split correctly
+    try:
+        temp_path = input_path.replace(".mp3", "_fast.mp3")
+        cmd = [
+            "ffmpeg", "-y", 
+            "-i", input_path, 
+            "-filter:a", f"atempo={speed}", 
+            "-vn", 
+            temp_path
+        ]
+        
+        # Capture output to see why it fails
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0 and os.path.exists(temp_path):
+            os.replace(temp_path, input_path)
+            print(f">> DEBUG: Speed up ({speed}x) applied via FFmpeg.")
+            return True
+        else:
+            print(f">> DEBUG: FFmpeg failed. Code: {result.returncode}")
+            print(f"   Stderr: {result.stderr}")
+            return False
+            
+    except Exception as e:
+        print(f">> DEBUG: FFmpeg subprocess error: {e}")
+        return False
+
 # --- ENGINE 3: gTTS ---
+# --- UPDATE try_gtts ---
 def try_gtts(text, output_path, lang):
     print(">> DEBUG: Falling back to gTTS...")
     try:
         clean_text = clean_ssml_for_google(text)
-        tts = gTTS(text=clean_text, lang=lang)
+        
+        # 1. Generate Standard Speed
+        tld = 'co.in' if lang == 'en' else 'com'
+        
+        tts = gTTS(text=clean_text, lang=lang, tld=tld, slow=False)
         tts.save(output_path)
+        
+        # 2. Apply Speed Hack (1.25x is good for News)
+        speed_up_mp3(output_path, speed=1.50)
+        
         print(f">> DEBUG: gTTS Success!")
         return True
-    except Exception: return False
+    except Exception as e: 
+        print(f">> DEBUG: gTTS Failed: {e}")
+        return False
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -122,14 +187,14 @@ if __name__ == "__main__":
     
     is_dev_mode = os.getenv("DEV_MODE", "True").lower() == "true"
     
-    if is_dev_mode:
+    '''if is_dev_mode:
         # Google First
         if try_google(args.text, args.output_path, args.lang, args.google_voice): sys.exit(0)
         if try_azure(args.text, args.output_path, args.lang, args.azure_voice): sys.exit(0)
     else:
         # Azure First
         if try_azure(args.text, args.output_path, args.lang, args.azure_voice): sys.exit(0)
-        if try_google(args.text, args.output_path, args.lang, args.google_voice): sys.exit(0)
-
+        if try_google(args.text, args.output_path, args.lang, args.google_voice): sys.exit(0)'''
+    print(f">> DEBUG: gTTS final call ***************** ")   
     if try_gtts(args.text, args.output_path, args.gtts_lang): sys.exit(0)
     sys.exit(1)

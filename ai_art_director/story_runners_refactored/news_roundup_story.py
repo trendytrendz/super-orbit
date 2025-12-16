@@ -1,7 +1,9 @@
 # ai_art_director/story_runners_refactored/news_roundup_story.py
-# v25.5.0 - Logging & Intro Headlines
+# v25.6.0 - Fixed Date Passing
 
 import random
+import requests
+import os
 from typing import Dict, List, Any
 from .base_story import BaseStory
 from .story_utils import StoryUtils
@@ -32,24 +34,17 @@ class NewsRoundupStory(BaseStory):
                 print(f"   -> Fetching news for {q}...")
                 nse, y_sym, disp = data_fetcher.resolve_symbol(q)
                 
-                # --- NEW: Fetch from ALL sources ---
-                # 1. Yahoo
+                # Fetch from ALL sources
                 n1 = data_fetcher.fetch_yfinance_news(y_sym)
-                # 2. Google
                 n2 = data_fetcher.fetch_google_news(disp, nse, days=3)
-                # 3. MoneyControl
                 n3 = data_fetcher.fetch_moneycontrol_news(disp)
-                # 4. Economic Times
                 n4 = data_fetcher.fetch_economic_times_news(disp)
                 
-                # Combine
+                # Combine & Sort (Newest First)
                 all_news = n1 + n2 + n3 + n4
-                
-                # --- NEW: Sorting Logic (Freshness First) ---
-                # Sort by 'published' date descending (Newest first)
                 all_news.sort(key=lambda x: x['published'], reverse=True)
                 
-                # Dedupe (Keep the newest version if duplicate titles exist)
+                # Dedupe
                 unique_news = []
                 seen = set()
                 for n in all_news:
@@ -57,18 +52,14 @@ class NewsRoundupStory(BaseStory):
                         unique_news.append(n)
                         seen.add(n['title'])
                 
-                # Filter Top Story
-                top_news = unique_news[:2] 
+                # LLM Ranking (Judge)
+                top_news = data_fetcher.rank_news_with_llm(unique_news, disp)
                 
-                # LOGGING
                 if top_news:
-                    print(f"      ★ Selected Story 1 ({top_news[0]['source']}): {top_news[0]['title']}")
-                    if len(top_news) > 1:
-                        print(f"      ★ Selected Story 2 ({top_news[1]['source']}): {top_news[1]['title']}")
+                    print(f"      ★ Selected Story 1: {top_news[0]['title']}")
                 else:
                     print(f"      ⚠️ No news found for {q}")
 
-                # Fetch Logo
                 logo = data_fetcher.fetch_company_logo(y_sym)
                 
                 roundup_data.append({
@@ -82,13 +73,11 @@ class NewsRoundupStory(BaseStory):
             all_logos = [d['logo'] for d in roundup_data]
             all_names = [d['display'] for d in roundup_data]
             
-            # Extract headlines for Intro Card
+            # Intro Headlines
             all_headlines = []
             for d in roundup_data:
-                if d['news']:
-                    all_headlines.append(d['news'][0]['title'])
-                else:
-                    all_headlines.append("No major updates today.")
+                if d['news']: all_headlines.append(d['news'][0]['title'])
+                else: all_headlines.append("No major updates.")
 
             # Slide 1: Intro (Grid)
             slides.append({
@@ -97,42 +86,61 @@ class NewsRoundupStory(BaseStory):
                 'text': "Market Roundup",
                 'logos': all_logos,
                 'names': all_names,
-                'headlines': all_headlines # Passing Headlines for Intro Grid
+                'headlines': all_headlines
             })
             
             # Slide 2..N: Glass Cards
-            # Slide 2..N: Glass Cards (Nested Loop)
-            # Strategy: Create 1 slide per news item
-            
             slide_counter = 0
             for item in roundup_data:
                 company_name = item['display']
                 company_logo = item['logo']
                 
                 if item['news']:
-                    # Iterate through available news (up to 2)
                     for news_item in item['news']:
                         headline = news_item['title']
                         source_name = news_item.get('source', 'News')
+                        image_url = news_item.get('image')
+                        pub_date = news_item.get('published') # <--- CRITICAL DATA POINT
                         
+                        # Download Image
+                        local_image_path = None
+                        if image_url:
+                            try:
+                                ext = 'jpg' if '.jpg' in image_url else 'png'
+                                fname = f"news_thumb_{slide_counter}_{random.randint(100,999)}.{ext}"
+                                local_path = config.TMP_IMG_DIR / fname
+                                
+                                # Basic headers to avoid 403
+                                headers = {'User-Agent': 'Mozilla/5.0'}
+                                r = requests.get(image_url, headers=headers, timeout=5)
+                                if r.status_code == 200:
+                                    with open(local_path, 'wb') as f: f.write(r.content)
+                                    local_image_path = str(local_path)
+                                    print(f"      - 🖼️ Downloaded News Image: {fname}")
+                            except Exception as e:
+                                print(f"      - ⚠️ Failed to download news image: {e}")
+
                         slides.append({
                             'type': 'glass_news', 
                             'key': f'news_{slide_counter}',
                             'company': company_name,
                             'logo': company_logo,
                             'text': headline,
-                            'source': source_name
+                            'source': source_name,
+                            'news_image_path': local_image_path,
+                            'published': pub_date # <--- CRITICAL PASS TO RENDERER
                         })
                         slide_counter += 1
                 else:
-                    # Fallback if NO news found for a stock (Rare but possible)
+                    # Fallback
                     slides.append({
                         'type': 'glass_news',
                         'key': f'news_{slide_counter}',
                         'company': company_name,
                         'logo': company_logo,
                         'text': "No major headlines today.",
-                        'source': "Market Data"
+                        'source': "Market Data",
+                        'published': utils.now_ist() # Default to today
                     })
                     slide_counter += 1
             

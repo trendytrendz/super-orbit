@@ -115,17 +115,87 @@ def generate_color_palette(base_hex, n_colors=5):
     return palette[:n_colors]
 
 def draw_candlestick_chart(df, symbol, size, theme, out_png):
-    df_chart = df.tail(252).copy(); df_chart['SMA50'] = df_chart['Close'].rolling(window=50).mean(); df_chart['SMA200'] = df_chart['Close'].rolling(window=200).mean()
-    mc = mpf.make_marketcolors(up=theme['accent'], down='#F44336', edge={'up':theme['accent'], 'down':'#F44336'}, wick={'up':theme['accent'], 'down':'#F44336'}, volume=theme['accent'], ohlc='i')
-    grid_color = mcolors.to_hex(mcolors.to_rgba(CHART_TEXT_COLOR, alpha=0.15)); s = mpf.make_mpf_style(marketcolors=mc, base_mpf_style='nightclouds', figcolor=config.BG_COLOR + '00', gridcolor=grid_color)
-    ap = [mpf.make_addplot(df_chart['SMA50'], color='orange', width=0.7), mpf.make_addplot(df_chart['SMA200'], color='purple', width=0.7)]
-    fig, axlist = mpf.plot(df_chart, type='candle', style=s, addplot=ap, title=f"\n{symbol} Price Action", ylabel='Price (INR)', volume=True, ylabel_lower='Volume', figsize=(size[0]/100, size[1]/100), returnfig=True)
-    for ax in axlist:
-        ax.yaxis.label.set_color(CHART_TEXT_COLOR); ax.yaxis.label.set_path_effects(TEXT_EFFECT); ax.xaxis.label.set_color(CHART_TEXT_COLOR); ax.xaxis.label.set_path_effects(TEXT_EFFECT)
-        for label in ax.get_xticklabels() + ax.get_yticklabels(): label.set_color(CHART_TEXT_COLOR); label.set_path_effects(TEXT_EFFECT)
-        ax.set_facecolor((0,0,0,0))
-    axlist[0].title.set_color(CHART_TEXT_COLOR); axlist[0].title.set_path_effects(TEXT_EFFECT)
-    fig.savefig(out_png, dpi=100, pad_inches=0.2, transparent=True); plt.close(fig); return out_png
+    try:
+        # 1. Validation
+        if df is None or df.empty:
+            print("      - ⚠️ Chart Data Empty. Skipping.")
+            return None
+            
+        # 2. Slice Data (Last 252 days / 1 year)
+        df_chart = df.tail(252).copy()
+        
+        # 3. Calculate SMAs (Safety Check)
+        # Only calc SMA200 if we have 200 data points in the FULL history, not just the slice
+        # But here we assume df passed is already full history.
+        
+        ap = []
+        
+        # SMA 50
+        if len(df) > 50:
+            df_chart['SMA50'] = df['Close'].rolling(window=50).mean().tail(252)
+            # Check if SMA50 has valid data in the visible range
+            if not df_chart['SMA50'].dropna().empty:
+                ap.append(mpf.make_addplot(df_chart['SMA50'], color='orange', width=1.5))
+
+        # SMA 200
+        if len(df) > 200:
+            df_chart['SMA200'] = df['Close'].rolling(window=200).mean().tail(252)
+            # Check if SMA200 has valid data in the visible range
+            if not df_chart['SMA200'].dropna().empty:
+                ap.append(mpf.make_addplot(df_chart['SMA200'], color='purple', width=1.5))
+
+        # 4. Style
+        mc = mpf.make_marketcolors(
+            up=theme['accent'], down='#F44336', 
+            edge={'up':theme['accent'], 'down':'#F44336'}, 
+            wick={'up':theme['accent'], 'down':'#F44336'}, 
+            volume=theme['accent'], ohlc='i'
+        )
+        
+        grid_color = mcolors.to_hex(mcolors.to_rgba(CHART_TEXT_COLOR, alpha=0.15))
+        s = mpf.make_mpf_style(marketcolors=mc, base_mpf_style='nightclouds', figcolor=config.BG_COLOR + '00', gridcolor=grid_color)
+        
+        # 5. Plot (Handle "Volume key error" if volume missing)
+        kwargs = dict(
+            type='candle', 
+            style=s, 
+            title=f"\n{symbol} Price Action", 
+            ylabel='Price (INR)', 
+            figsize=(size[0]/100, size[1]/100), 
+            returnfig=True
+        )
+        
+        if 'Volume' in df_chart.columns and not df_chart['Volume'].empty:
+             kwargs['volume'] = True
+             kwargs['ylabel_lower'] = 'Volume'
+
+        if ap:
+            kwargs['addplot'] = ap
+
+        fig, axlist = mpf.plot(df_chart, **kwargs)
+        
+        # 6. Formatting (Text Color)
+        for ax in axlist:
+            ax.yaxis.label.set_color(CHART_TEXT_COLOR)
+            ax.yaxis.label.set_path_effects(TEXT_EFFECT)
+            ax.xaxis.label.set_color(CHART_TEXT_COLOR)
+            ax.xaxis.label.set_path_effects(TEXT_EFFECT)
+            for label in ax.get_xticklabels() + ax.get_yticklabels(): 
+                label.set_color(CHART_TEXT_COLOR)
+                label.set_path_effects(TEXT_EFFECT)
+            ax.set_facecolor((0,0,0,0))
+            
+        axlist[0].title.set_color(CHART_TEXT_COLOR)
+        axlist[0].title.set_path_effects(TEXT_EFFECT)
+        
+        fig.savefig(out_png, dpi=100, pad_inches=0.2, transparent=True)
+        plt.close(fig)
+        return out_png
+        
+    except Exception as e:
+        print(f"      - ⚠️ Candlestick Chart Error: {e}")
+        # import traceback; traceback.print_exc()
+        return None
 
 def draw_index_comparison_chart(df_stock, df_index, stock_name, index_name, size, theme, out_png):
     print("   -> Drawing index comparison chart...")
@@ -170,7 +240,7 @@ def draw_metrics_infographic(metrics, size, theme, out_png):
     print("   -> Drawing key metrics infographic (Pillow)..."); 
     try:
         img = Image.new('RGBA', size, (0, 0, 0, 0)); draw = ImageDraw.Draw(img); font_path = theme['font']
-        title_text = "Key Metrics"; title_font = utils.get_optimal_font_size(title_text, 60, size[0] * 0.9, size[1] * 0.2, font_path)
+        title_text = "Key Metrics"; title_font = core.load_font(font_path, 60) 
         title_bbox = draw.textbbox((0, 0), title_text, font=title_font)
         utils.draw_gradient_text(draw, title_text, title_font, ((size[0] - title_bbox[2]) / 2, size[1] * 0.1), theme['accent'], theme.get('gradient_end', theme['accent']))
         label_font = ImageFont.truetype(font_path, 36); y_start, y_step = size[1] * 0.3, 90
