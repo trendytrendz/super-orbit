@@ -1,6 +1,6 @@
 export AZURE_SPEECH_KEY="1B1AOM2ntazNqqsp3DLc75RPM0PizogNSxssvML6y0sPGTSKhVaEJQQJ99BJACYeBjFXJ3w3AAAYACOGhLWW"
 export AZURE_SPEECH_REGION="eastus"
 export PEXELS_API_KEY="nxCLFRROWAVcR6ZbkY7IGU53qAKhZA7uMIA6QxWrPSnkfn5SATvjoZUh"
-export GOOGLE_APPLICATION_CREDENTIALS="/workspaces/codespaces-blank/google_key.json"
+export GOOGLE_APPLICATION_CREDENTIALS="/workspaces/super-orbit/google_key.json"
 export DEV_MODE="True"
 # export ELEVENLABS_API_KEY ="sk_79e22944c669b463076765a7ac35ed79f75db0bbd5572a4e"
