@@ -1,200 +1,90 @@
 # ai_art_director/tts_worker.py
-# v24.3.2 - Accepts Google Voice Arg
+# v27.6.1 - Fixed Argument Mismatch
 
 import argparse
 import os
 import sys
-import re
+import subprocess
 from gtts import gTTS
-try:
-    from pydub import AudioSegment
-    PYDUB_AVAILABLE = True
-except ImportError:
-    PYDUB_AVAILABLE = False
 
+def clean_text_for_cli(text):
+    """Sanitize text for command line usage."""
+    # Remove characters that break shell commands
+    t = text.replace('"', '').replace("'", "").replace('\n', ' ')
+    return t.strip()
 
-# --- 1. Azure Import ---
-try:
-    import azure.cognitiveservices.speech as speechsdk
-    AZURE_AVAILABLE = True
-except ImportError:
-    AZURE_AVAILABLE = False
-
-# --- 2. Google Import ---
-try:
-    from google.cloud import texttospeech
-    GOOGLE_AVAILABLE = True
-except ImportError:
-    GOOGLE_AVAILABLE = False
-
-def clean_ssml_for_google(text):
-    text = re.sub(r'<[^>]+>', '', text)
-    return text.strip()
-
-# --- ENGINE 1: AZURE ---
-def try_azure(text, output_path, lang, voice_name):
-    if not AZURE_AVAILABLE: return False
-    key = os.getenv("AZURE_SPEECH_KEY")
-    region = os.getenv("AZURE_SPEECH_REGION")
-    if not key or not region: return False
-
-    print(f">> DEBUG: Trying Azure ({voice_name})...")
+def try_edge_cli(text, output_path, lang, voice=None, rate=None):
     try:
-        speech_config = speechsdk.SpeechConfig(subscription=key, region=region)
-        speech_config.speech_synthesis_voice_name = voice_name
-        speech_config.set_speech_synthesis_output_format(
-            speechsdk.SpeechSynthesisOutputFormat.Audio24Khz160KBitRateMonoMp3
-        )
+        # Default safe voice
+        if not voice:
+            voice = "en-US-AriaNeural" # Safest global default
         
-        ssml = text if text.strip().startswith("<speak") else f"<speak version='1.0' xml:lang='{lang}'><voice name='{voice_name}'>{text}</voice></speak>"
+        # Clean rate (Some versions dislike +0%)
+        if rate == "+0%": rate = None 
         
-        audio_config = speechsdk.audio.AudioOutputConfig(filename=output_path)
-        synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
+        safe_text = clean_text_for_cli(text)
         
-        result = synthesizer.speak_ssml_async(ssml).get()
-
-        if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-            print(f">> DEBUG: Azure Success! ({os.path.getsize(output_path)} bytes)")
+        cmd = ["edge-tts", "--text", safe_text, "--write-media", output_path, "--voice", voice]
+        if rate: cmd.append(f"--rate={rate}")
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
+        
+        if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 100:
             return True
-        else:
-            print(f">> DEBUG: Azure Failed: {result.cancellation_details.error_details}", file=sys.stderr)
-    except Exception as e:
-        print(f">> DEBUG: Azure Error: {e}", file=sys.stderr)
-    return False
-
-# --- ENGINE 2: GOOGLE CLOUD ---
-def try_google(text, output_path, lang, voice_name):
-    if not GOOGLE_AVAILABLE: return False
-    if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"): return False
-
-    #print(f">> DEBUG: Trying Google Cloud ({voice_name})...")
-    try:
-        client = texttospeech.TextToSpeechClient()
-        clean_text = clean_ssml_for_google(text)
-        synthesis_input = texttospeech.SynthesisInput(text=clean_text)
         
-        # USE THE VOICE NAME PASSED FROM ARGUMENTS
-        voice = texttospeech.VoiceSelectionParams(
-            language_code="en-US" if lang == 'en' else "hi-IN",
-            name=voice_name
-        )
-
-        # Journey voices do NOT support pitch/volume
-        is_journey = "Journey" in voice_name
+        # If specific voice failed, try generic fallback
+        print(f">> DEBUG: Voice '{voice}' failed. Trying fallback 'en-US-AriaNeural'...", file=sys.stderr)
+        cmd_fallback = ["edge-tts", "--text", safe_text, "--write-media", output_path, "--voice", "en-US-AriaNeural"]
+        result_fb = subprocess.run(cmd_fallback, capture_output=True, text=True, timeout=45)
         
-        audio_config = texttospeech.AudioConfig(
-            audio_encoding=texttospeech.AudioEncoding.MP3,
-            speaking_rate=1.15
-        )
-        
-        if not is_journey:
-            audio_config.pitch = 2.0
-
-        response = client.synthesize_speech(
-            input=synthesis_input, voice=voice, audio_config=audio_config
-        )
-
-        with open(output_path, "wb") as out:
-            out.write(response.audio_content)
-            
-        print(f">> DEBUG: Google Success! ({os.path.getsize(output_path)} bytes)")
-        return True
-    except Exception as e:
-        print(f">> DEBUG: Google Error: {e}", file=sys.stderr)
-    return False
-
-def speed_up_mp3(input_path, speed=1.25):
-    """Speed up audio using pydub (reliable) or ffmpeg (fallback)"""
-    
-    # METHOD 1: Pydub (Preferred)
-    if PYDUB_AVAILABLE:
-        try:
-            sound = AudioSegment.from_mp3(input_path)
-            
-            # Pydub doesn't have direct 'speed' change without pitch shift
-            # But we can cheat by changing frame rate
-            new_sample_rate = int(sound.frame_rate * speed)
-            faster_sound = sound._spawn(sound.raw_data, overrides={'frame_rate': new_sample_rate})
-            faster_sound = faster_sound.set_frame_rate(44100) # Reset to standard
-            
-            faster_sound.export(input_path, format="mp3")
-            print(f">> DEBUG: Speed up ({speed}x) applied via Pydub.")
+        if result_fb.returncode == 0 and os.path.exists(output_path):
             return True
-        except Exception as e:
-            print(f">> DEBUG: Pydub failed: {e}")
 
-    # METHOD 2: FFmpeg (Fallback)
-    # Ensure command is split correctly
-    try:
-        temp_path = input_path.replace(".mp3", "_fast.mp3")
-        cmd = [
-            "ffmpeg", "-y", 
-            "-i", input_path, 
-            "-filter:a", f"atempo={speed}", 
-            "-vn", 
-            temp_path
-        ]
-        
-        # Capture output to see why it fails
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        
-        if result.returncode == 0 and os.path.exists(temp_path):
-            os.replace(temp_path, input_path)
-            print(f">> DEBUG: Speed up ({speed}x) applied via FFmpeg.")
-            return True
-        else:
-            print(f">> DEBUG: FFmpeg failed. Code: {result.returncode}")
-            print(f"   Stderr: {result.stderr}")
-            return False
-            
-    except Exception as e:
-        print(f">> DEBUG: FFmpeg subprocess error: {e}")
+        print(f">> DEBUG: Edge Failed. {result.stderr}", file=sys.stderr)
         return False
 
-# --- ENGINE 3: gTTS ---
-# --- UPDATE try_gtts ---
+    except Exception as e:
+        print(f">> DEBUG: Edge Exception: {e}", file=sys.stderr)
+        return False
+
 def try_gtts(text, output_path, lang):
-    print(">> DEBUG: Falling back to gTTS...")
     try:
-        clean_text = clean_ssml_for_google(text)
-        
-        # 1. Generate Standard Speed
+        print("   ⚠️ Falling back to gTTS...", file=sys.stderr)
         tld = 'co.in' if lang == 'en' else 'com'
-        
-        tts = gTTS(text=clean_text, lang=lang, tld=tld, slow=False)
+        tts = gTTS(text=text, lang=lang, tld=tld, slow=False)
         tts.save(output_path)
-        
-        # 2. Apply Speed Hack (1.25x is good for News)
-        speed_up_mp3(output_path, speed=1.50)
-        
-        print(f">> DEBUG: gTTS Success!")
         return True
-    except Exception as e: 
-        print(f">> DEBUG: gTTS Failed: {e}")
-        return False
+    except: return False
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("text"); parser.add_argument("output_path")
+    parser.add_argument("text")
+    parser.add_argument("output_path")
     parser.add_argument("--lang", default='en')
-    parser.add_argument("--azure_voice", default="en-US-AriaNeural")
-    parser.add_argument("--google_voice", default="en-US-Journey-D") # Default if missing
+    
+    # New Arguments
+    parser.add_argument("--edge_voice", default=None)
+    parser.add_argument("--edge_rate", default=None)
+    
+    # Legacy args ignored (prevent crash)
+    parser.add_argument("--azure_voice", default="")
+    parser.add_argument("--google_voice", default="")
     parser.add_argument("--gtts_lang", default="en")
     parser.add_argument("--ssml", action="store_true")
+    
     args = parser.parse_args()
-
+    
+    # Create directory if missing
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
-    
-    is_dev_mode = os.getenv("DEV_MODE", "True").lower() == "true"
-    
-    '''if is_dev_mode:
-        # Google First
-        if try_google(args.text, args.output_path, args.lang, args.google_voice): sys.exit(0)
-        if try_azure(args.text, args.output_path, args.lang, args.azure_voice): sys.exit(0)
-    else:
-        # Azure First
-        if try_azure(args.text, args.output_path, args.lang, args.azure_voice): sys.exit(0)
-        if try_google(args.text, args.output_path, args.lang, args.google_voice): sys.exit(0)'''
-    print(f">> DEBUG: gTTS final call ***************** ")   
-    if try_gtts(args.text, args.output_path, args.gtts_lang): sys.exit(0)
+
+    # 1. Try Edge (Passing all 5 arguments correctly)
+    if try_edge_cli(args.text, args.output_path, args.lang, args.edge_voice, args.edge_rate):
+        sys.exit(0)
+        
+    # 2. Try gTTS
+    if try_gtts(args.text, args.output_path, args.lang):
+        sys.exit(0)
+
+    # 3. Fail
     sys.exit(1)

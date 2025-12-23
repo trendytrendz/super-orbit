@@ -28,20 +28,24 @@ class NewsRoundupStory(BaseStory):
         
         try:
             roundup_data = []
-            
+            # Determine Limit based on total stocks
+            # 2 Stocks -> 3 News each
+            # 3+ Stocks -> 2 News each
+            news_limit = 3 if len(queries) <= 2 else 2
             # 1. Fetch Data
             for q in queries:
                 print(f"   -> Fetching news for {q}...")
                 nse, y_sym, disp = data_fetcher.resolve_symbol(q)
                 
                 # Fetch from ALL sources
-                n1 = data_fetcher.fetch_yfinance_news(y_sym)
+                #n1 = data_fetcher.fetch_yfinance_news(y_sym)
                 n2 = data_fetcher.fetch_google_news(disp, nse, days=3)
-                n3 = data_fetcher.fetch_moneycontrol_news(disp)
-                n4 = data_fetcher.fetch_economic_times_news(disp)
+                #n3 = data_fetcher.fetch_moneycontrol_news(disp)
+                #n4 = data_fetcher.fetch_economic_times_news(disp)
                 
                 # Combine & Sort (Newest First)
-                all_news = n1 + n2 + n3 + n4
+                #all_news = n1 + n2 + n3 + n4
+                all_news = n2
                 all_news.sort(key=lambda x: x['published'], reverse=True)
                 
                 # Dedupe
@@ -53,7 +57,8 @@ class NewsRoundupStory(BaseStory):
                         seen.add(n['title'])
                 
                 # LLM Ranking (Judge)
-                top_news = data_fetcher.rank_news_with_llm(unique_news, disp)
+                # Pass limit to ranking function
+                top_news = data_fetcher.rank_news_with_llm(unique_news, disp, limit=news_limit)
                 
                 if top_news:
                     print(f"      ★ Selected Story 1: {top_news[0]['title']}")
