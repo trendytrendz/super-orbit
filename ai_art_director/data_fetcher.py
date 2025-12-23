@@ -20,7 +20,9 @@ from .data.financials import (
     fetch_yfinance_supplemental_details,
     fetch_quarterly_financials,
     fetch_price_data,
-    compute_price_snapshot
+    compute_price_snapshot,
+    fetch_price_data_with_technicals,
+    fetch_3yr_fundamentals
 )
 
 # 4. Assets

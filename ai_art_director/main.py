@@ -1,5 +1,5 @@
 # main.py
-# v24.3.3 - Fixed Argument Parsing Logic
+# v27.1
 
 import argparse
 import os
@@ -10,6 +10,8 @@ import traceback
 from . import config
 from . import utils
 from . import story_runners
+from . import initializer
+# custom_json_runner is imported via story_runners factory, no direct import needed here
 
 class VideoGenerationError(Exception):
     pass
@@ -17,6 +19,9 @@ class VideoGenerationError(Exception):
 def run_pipeline(args):
     """Main video generation pipeline."""
     # 1. Setup & CLEANUP
+      # 0. RUN SYSTEM CHECKS (Auto-creates folders, fonts, assets)
+    initializer.run_checks()
+    
     utils.setup_project_directories()
     utils.cleanup_temp_images()
     
@@ -28,7 +33,7 @@ def run_pipeline(args):
         theme['lang'] = 'hi'
         print(f"✅ Language is Hindi: Using font {os.path.basename(config.HINDI_FONT)}")
     else:
-        # FIX: Ensure we use the English font for 'en'
+        # Ensure we use the English font for 'en'
         theme['font'] = config.DEFAULT_FONT
         theme['lang'] = 'en'
         print(f"✅ Language is English: Using font {os.path.basename(config.DEFAULT_FONT)}")
@@ -36,8 +41,6 @@ def run_pipeline(args):
     # Safety Check
     if not os.path.exists(theme['font']) and not theme['font'].startswith("Arial"):
         print(f"⚠️  Warning: Font file {theme['font']} not found. Falling back to default.")
-        
-        # If English font missing, try to find ANY ttf
         if args.lang == 'en':
              theme['font'] = config.DEFAULT_FONT
 
@@ -46,7 +49,7 @@ def run_pipeline(args):
         "theme": theme,
         "icon_svg": config.ICONS,
         "lang": args.lang,
-        "input_file": args.input # <--- Pass the input file path here
+        "input_file": args.input # Pass input file path to runner config
     }
 
     # 3. Use the Factory to get the correct runner instance
@@ -55,60 +58,67 @@ def run_pipeline(args):
     except ValueError as e:
         raise VideoGenerationError(e)
 
-    # 4. Determine queries (Fixed Logic)
+    # 4. Determine Input Data (Queries)
     queries = []
-     # CASE A: Custom News (File Driven)
-    if args.type == 'custom_news':
+
+    # CASE 1: Custom JSON (TV Broadcast)
+    if args.type == "custom_json":
+        if not args.input:
+            raise VideoGenerationError("--input [path_to_json] is required for custom_json type.")
+        # We pass the filename as the "query"
+        queries = [args.input]
+
+    # CASE 2: Custom News (Legacy File Driven)
+    elif args.type == 'custom_news':
         if not args.input:
             raise VideoGenerationError("Story type 'custom_news' requires --input argument pointing to a JSON file.")
-        
-        # Inject a placeholder query so downstream validation and filename generation don't crash
-        # The CustomNewsStory runner ignores this list anyway.
         input_filename = os.path.splitext(os.path.basename(args.input))[0]
         queries = [input_filename] 
 
-    # CASE B: Comparison (Multi-Stock)
+    # CASE 3: Comparison (Multi-Stock)
     elif args.type == 'comparison':
         # Prioritize --companies flag, fallback to positional args
         queries = args.companies if args.companies else args.queries
         
-    # CASE C: Standard Stories (Single Ticker)
+    # CASE 4: Standard Stories (Single Ticker)
     else:
         queries = args.queries
 
     # Validation (Global)
     if not queries:
-        raise VideoGenerationError(f"No company names provided. Please add company names after the command (e.g. 'Reliance')")
+        raise VideoGenerationError(f"No company names or input files provided. Please check your arguments.")
+
     # 5. Output Path
-    base_name = "_vs_".join(q.replace(' ', '_') for q in queries)
+    base_name = "_vs_".join(q.replace(' ', '_').replace('/', '_') for q in queries)
     out_path = args.out or os.path.join(config.OUTPUT_DIR, f"{base_name}_{args.type}_{args.format}.mp4")
 
     # 6. Execute the story runner's `run` method
-    print(f"\n🚀 Starting '{args.type}' story for: {queries}")
+    print(f"\n🚀 Starting '{args.type}' story...")
     
-    # Pass 'queries' directly (ComparisonStory expects a list, DeepDive/Spotlight expect list but take [0])
+    # Standardize the call. All runners must implement run(queries, format, out_path)
     success = runner.run(queries, args.format, out_path)
 
     # 7. Verify Output
-    if success and os.path.exists(out_path):
-        size_mb = os.path.getsize(out_path) / (1024 * 1024)
-        print(f"\n🎉 SUCCESS: Video created at '{out_path}' ({size_mb:.2f} MB)")
+    # Note: custom_json might save to a different specific path, so we check general success
+    if success:
+        print(f"\n🎉 SUCCESS: Pipeline finished.")
     else:
         raise VideoGenerationError("The story runner failed to produce a video file.")
 
 def main():
     parser = argparse.ArgumentParser(description=f"AI Art Director v{config.__version__}")
     
-    # Existing args...
     parser.add_argument("queries", nargs='*', help="Company names")
-    parser.add_argument("--type", choices=['news', 'deepdive', 'comparison', 'spotlight', 'custom_news', 'news_roundup'], required=True) # Added types
     parser.add_argument("--format", choices=['landscape', 'portrait'], default='portrait')
     parser.add_argument("--lang", choices=['en', 'hi'], default='en')
     parser.add_argument("--out", help="Custom output MP4 path.")
     parser.add_argument("--companies", nargs='+', help="Explicit companies list.")
     
-    # NEW ARGUMENT
-    parser.add_argument("--input", help="Path to JSON file for Custom News")
+    parser.add_argument("--type", help="Story type", required=True,
+        choices=["news", "deepdive", "comparison", "spotlight", "custom_news", "news_roundup", "stock360", "custom_json"]
+    ) 
+    
+    parser.add_argument("--input", help="Path to JSON file for Custom News/JSON")
     
     args = parser.parse_args()
 

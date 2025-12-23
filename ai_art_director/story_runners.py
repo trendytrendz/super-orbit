@@ -19,6 +19,8 @@ from .story_runners_refactored.spotlight_story import SpotlightStory
 # NEW IMPORTS
 from .story_runners_refactored.custom_news_story import CustomNewsStory
 from .story_runners_refactored.news_roundup_story import NewsRoundupStory
+from .story_runners_refactored.stock360_story import Stock360Story
+from ai_art_director.story_runners_refactored.custom_json_runner import CustomJsonStory
 
 STORY_RUNNER_MAP = {
     "news": NewsStory,
@@ -26,7 +28,9 @@ STORY_RUNNER_MAP = {
     "comparison": ComparisonStory,
     "spotlight": SpotlightStory,
     "custom_news": CustomNewsStory,   # <--- Registered
-    "news_roundup": NewsRoundupStory  # <--- Registered
+    "news_roundup": NewsRoundupStory,  # <--- Registered
+    "stock360": Stock360Story, # <--- NEW
+    "custom_json": CustomJsonStory, # <--- NEW (TV Broadcast)
 }
 
 print("✅ Story Runner Factory Initialized")

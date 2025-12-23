@@ -17,6 +17,8 @@ OUTPUT_DIR = ROOT_DIR / "outputs"
 TMP_DIR = OUTPUT_DIR / "tmp"
 ASSETS_DIR = ROOT_DIR / "assets"
 MUSIC_DIR = ROOT_DIR / "music" 
+# --- NEW DIRECTORY ---
+CUSTOM_INPUT_DIR = ASSETS_DIR / "custom_input"
 
 FALLBACK_BACKGROUND_DIR = ASSETS_DIR / "fallback_backgrounds"
 FONT_DIR = ASSETS_DIR / "fonts"
@@ -56,19 +58,23 @@ def get_chart_size(video_format: str) -> tuple:
     if video_format == 'landscape': return (1100, 550)
     return (680, 500)
 
+# --- VOICE CONFIG (UPDATED FOR EDGE) ---
+# --- VOICE CONFIG ---
 # --- VOICE CONFIG ---
 VOICE_CONFIG = {
     "en": {
+        "edge_voice": "en-IN-NeerjaNeural",    # Try Neerja instead of Aashi
+        "edge_rate": "+0%",                    # Keep explicit rate
         "azure_voice": "en-US-AvaNeural", 
         "google_voice": "en-US-Journey-F", 
-        "gtts_lang": "en", 
-        "ssml_prosody": {"rate": "115%", "pitch": "+0%", "volume": "+0%", "style": "friendly"}
+        "gtts_lang": "en"
     },
     "hi": {
+        "edge_voice": "hi-IN-SwaraNeural",     
+        "edge_rate": "+10%",
         "azure_voice": "hi-IN-SwaraNeural", 
         "google_voice": "hi-IN-Neural2-A", 
-        "gtts_lang": "hi", 
-        "ssml_prosody": {"rate": "115%", "pitch": "+0%", "volume": "+0%", "style": "cheerful"}
+        "gtts_lang": "hi"
     }
 }
 def get_voice_for_lang(lang: str = 'en') -> dict:
@@ -119,6 +125,19 @@ STORY_THEMES = {
         "intro_text": "Market Roundup: Top Stories", 
         "cta_text": "Which stock are you tracking? Comment below!", 
         "cta_icons": ["comment", "like", "share", "subscribe"]
+    },
+     "stock360": {
+        "intro_text": "Stock 360: {company_name}",
+        "cta_text": "Buy, Sell or Hold? Comment now!",
+        "cta_icons": ["like", "comment", "share", "subscribe"]
+    },
+    
+    
+    # NEW: TV Broadcast Format
+    "custom_json": {
+        "intro_text": "Breaking News", 
+        "cta_text": "Subscribe now for daily market updates.", 
+        "cta_icons": ["subscribe", "bell", "like", "share"] # Good for metadata, though CustomJson uses 'market_dashboard' theme for outro usually
     }
 }
 

@@ -41,133 +41,68 @@ class AudioGenerator:
             os.makedirs(d, exist_ok=True)
     
     def generate_single_voiceover(self, text: str, output_path: str, lang: str = 'en') -> bool:
-        """Generate single voiceover with enhanced path handling"""
         try:
-            # Validate input
             if not text or not text.strip():
-                print(f"      - ⚠️  Empty text for voiceover: {os.path.basename(output_path)}")
                 return self.create_proper_silent_audio(output_path, duration=3.0)
             
-            # FIX: Use Absolute Path for Worker
             script_dir = str(config.SRC_DIR)
             tts_worker_path = os.path.join(script_dir, "tts_worker.py")
             
-            if not os.path.exists(tts_worker_path):
-                print(f"❌ TTS worker not found at: {tts_worker_path}")
-                return self.create_proper_silent_audio(output_path, duration=4.0)
+            # CONFIG
+            vc = config.get_voice_for_lang(lang)
+            edge_voice = vc.get("edge_voice", "en-IN-AashiNeural") 
+            edge_rate = vc.get("edge_rate", "+0%")
             
-            # Use consistent voice configuration from voice_config
-            try:
-                from . import voice_config
-                vc = voice_config.get_voice_for_lang(lang)
-                azure_voice = vc.get("azure_voice")
-                gtts_lang = vc.get("gtts_lang")
-            except ImportError:
-                print(f"      - ⚠️  voice_config not available, using fallback for {lang}")
-                if lang == 'hi':
-                    azure_voice = "hi-IN-SwaraNeural"
-                    gtts_lang = "hi"
-                else:
-                    azure_voice = "en-US-AriaNeural"
-                    gtts_lang = "en"
-            
-            # 3. Config - Read from config.py
-            azure_voice = "en-US-AriaNeural"
-            google_voice = "en-US-Journey-D" # Default
-            gtts_lang = "en"
-            
-            if config.VOICE_CONFIG:
-                vc = config.get_voice_for_lang(lang)
-                azure_voice = vc.get("azure_voice", azure_voice)
-                google_voice = vc.get("google_voice", google_voice) # <--- Get Google Voice
-                gtts_lang = vc.get("gtts_lang", gtts_lang)
-            
-            # 4. Run Command - PASS GOOGLE VOICE
             cmd = [
-                sys.executable,
-                tts_worker_path,
-                text,
-                output_path,
+                sys.executable, tts_worker_path, 
+                text, output_path, 
                 "--lang", lang,
-                "--azure_voice", azure_voice,
-                "--google_voice", google_voice, # <--- PASS IT HERE
-                "--gtts_lang", gtts_lang,
-                "--ssml"
+                "--edge_voice", edge_voice,
+                "--edge_rate", edge_rate
             ]
             
-            # Run TTS worker - NO CWD ARGUMENT
-            # This ensures it runs in the root context and respects the absolute output path
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
+            # RUN WITH CAPTURE
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
             
-            if result.returncode == 0:
-                if os.path.exists(output_path) and os.path.getsize(output_path) > 500:
-                    #print(result.stdout)
-                    #print("--- WORKER STDERR ---")
-                    print(result.stderr)
-                    #print("---------------------")
-                    return True
-                else:
-                    print(f"      - ❌ Voiceover file invalid/small: {output_path}")
-                    print(f"      - Worker Output: {result.stdout}")
-                    return self.create_proper_silent_audio(output_path, duration=4.0)
+            # # --- ALWAYS PRINT DEBUG INFO ---
+            # if "Edge CLI Success" in result.stdout:
+            #     # print(f"      - {result.stdout.strip()}") # Uncomment for noisy success
+            #     pass
+            # else:
+            #     # If Edge didn't explicitly succeed, show me why
+            #     print(f"      - ⚠️ TTS Worker Output:\n{result.stdout}\n{result.stderr}")
+
+            if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 100:
+                return True
             else:
-                print(f"      - ❌ TTS worker failed: {result.stderr}")
+                print(f"      - ❌ TTS FAILED. RetCode: {result.returncode}")
                 return self.create_proper_silent_audio(output_path, duration=4.0)
                 
-        except subprocess.TimeoutExpired:
-            print(f"      - ❌ TTS worker timeout")
-            return self.create_proper_silent_audio(output_path, duration=4.0)
         except Exception as e:
-            print(f"      - ❌ Voiceover generation failed: {e}")
-            traceback.print_exc()
+            print(f"      - ❌ Exception: {e}")
             return self.create_proper_silent_audio(output_path, duration=4.0)
     
     def generate_segmented_voiceover(self, audio_script_parts: Dict[str, str], lang: str = 'en') -> Dict[str, str]:
-        """Generate multiple voiceover segments for a complete script"""
         audio_paths = {}
-        
-        print(f"   -> 🎵 Generating {len(audio_script_parts)} {lang.upper()} voiceover segments...")
+        print(f"   -> 🎵 Generating {len(audio_script_parts)} voiceovers...")
         
         for key, text in audio_script_parts.items():
-            if not text or not text.strip():
-                continue
-            
-            # Create safe filename
             safe_key = "".join(c for c in key if c.isalnum() or c in ('_', '-')).rstrip()
             filename = f"vo_{safe_key}.mp3"
-            
-            # FIX: Use absolute directory from self.dirs
             output_path = os.path.join(self.dirs["voiceovers"], filename)
             
-            # Use cache if available
             cache_key = f"{lang}_{hash(text)}"
             cache_path = os.path.join(self.dirs["cache"], f"{cache_key}.mp3")
 
             if os.path.exists(cache_path) and os.path.getsize(cache_path) > 500:
                 shutil.copy2(cache_path, output_path)
                 audio_paths[key] = output_path
-                print(f"      - ♻️  Cached: {filename}")
                 continue
             
-            # Generate new voiceover
-            success = self.generate_single_voiceover(text, output_path, lang)
-            
-            if success:
+            if self.generate_single_voiceover(text, output_path, lang):
                 audio_paths[key] = output_path
-                # Cache the successful generation
                 if os.path.getsize(output_path) > 2000:
                      shutil.copy2(output_path, cache_path)
-            else:
-                print(f"      - ❌ Failed to generate voiceover for: {key}")
-                # Create silent fallback
-                if self.create_proper_silent_audio(output_path, duration=4.0):
-                    audio_paths[key] = output_path
-        
         return audio_paths
     
     def create_proper_silent_audio(self, output_path: str, duration: float = 3.0) -> bool:
@@ -201,3 +136,14 @@ class AudioGenerator:
 
 # Global Instance (Optional, for backward compat)
 audio_generator = AudioGenerator()
+
+BG_TRACKS = [
+    "breaking_news_intro.mp3", # Urgent
+    "tech_daily.mp3",          # Modern
+    "market_floor.mp3"         # Ambient
+]
+
+def get_random_bgm():
+    """Pick a random background track for the video"""
+    track = random.choice(BG_TRACKS)
+    return os.path.join("assets/audio/bgm", track)

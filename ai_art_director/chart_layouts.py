@@ -22,23 +22,56 @@ def draw_sector_infographic(sector, market_cap, size, theme, out_png):
     print(f"   -> Drawing sector & scale infographic...")
     if not sector and not market_cap: return None
     try:
-        img = Image.new('RGBA', size, (0, 0, 0, 0)); draw = ImageDraw.Draw(img); font_path = theme['font']
-        y_pos_sector, y_pos_mcap = size[1] * 0.35, size[1] * 0.65
+        img = Image.new('RGBA', size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        font_path = theme['font']
+        
+        y_pos_sector = size[1] * 0.35
+        y_pos_mcap = size[1] * 0.65
+        
+        # 1. Sector Text
         if sector:
-            sector_font = utils.get_optimal_font_size(f"Sector: {sector}", 70, size[0] * 0.9, size[1] * 0.3, font_path)
-            sector_text = f"Sector: {sector}"; sector_bbox = draw.textbbox((0, 0), sector_text, font=sector_font)
+            sector_font = core.load_font(font_path, 70)
+            sector_text = f"Sector: {sector}"
+            
+            # Auto-shrink if too wide
+            while sector_font.getlength(sector_text) > size[0] * 0.9 and sector_font.size > 30:
+                sector_font = core.load_font(font_path, sector_font.size - 5)
+                
+            sector_bbox = draw.textbbox((0, 0), sector_text, font=sector_font)
             draw.text(((size[0] - sector_bbox[2]) / 2, y_pos_sector), sector_text, font=sector_font, fill=theme['text'])
+            
+        # 2. Market Cap Text (Rounded & Formatted)
         if market_cap:
-            # FIX (Phase 1): Corrected "₹" to "Rs." for consistency.
-            mcap_text = f"Market Cap: Rs. {market_cap:,.0f} Cr"
-            font_size = 100; mcap_font = ImageFont.truetype(font_path, font_size)
-            # FIX (Phase 1): Robust font-shrinking loop.
-            while draw.textlength(mcap_text, font=mcap_font) > size[0] * 0.95 and font_size > 20:
-                font_size -= 4; mcap_font = ImageFont.truetype(font_path, font_size)
+            # FIX: Ensure float and round to 0 decimal places for large numbers
+            mcap_val = float(market_cap) if market_cap else 0
+            
+            # Format logic: 1,234 Cr
+            mcap_text = f"Market Cap: Rs. {mcap_val:,.0f} Cr"
+            
+            font_size = 100
+            mcap_font = core.load_font(font_path, font_size)
+            
+            # Robust font-shrinking loop
+            while mcap_font.getlength(mcap_text) > size[0] * 0.95 and font_size > 20:
+                font_size -= 4
+                mcap_font = core.load_font(font_path, font_size)
+                
             mcap_bbox = draw.textbbox((0, 0), mcap_text, font=mcap_font)
-            utils.draw_gradient_text(draw, mcap_text, mcap_font, ((size[0] - mcap_bbox[2]) / 2, y_pos_mcap), theme['accent'], theme.get('gradient_end', theme['accent']))
-        img.save(out_png); return out_png
-    except Exception as e: print(f"      - Could not draw Pillow sector infographic: {e}"); return None
+            
+            # Gradient Text Draw
+            utils.draw_gradient_text(
+                draw, mcap_text, mcap_font, 
+                ((size[0] - mcap_bbox[2]) / 2, y_pos_mcap), 
+                theme['accent'], theme.get('gradient_end', theme['accent'])
+            )
+            
+        img.save(out_png)
+        return out_png
+        
+    except Exception as e: 
+        print(f"      - Could not draw Pillow sector infographic: {e}")
+        return None
 
 def draw_comparison_bar_chart(metric_name, data, size, theme, out_png):
     print(f"   -> Drawing multi-stock comparison chart for: {metric_name}")
@@ -125,24 +158,21 @@ def draw_candlestick_chart(df, symbol, size, theme, out_png):
         df_chart = df.tail(252).copy()
         
         # 3. Calculate SMAs (Safety Check)
-        # Only calc SMA200 if we have 200 data points in the FULL history, not just the slice
-        # But here we assume df passed is already full history.
-        
         ap = []
         
-        # SMA 50
-        if len(df) > 50:
-            df_chart['SMA50'] = df['Close'].rolling(window=50).mean().tail(252)
-            # Check if SMA50 has valid data in the visible range
-            if not df_chart['SMA50'].dropna().empty:
-                ap.append(mpf.make_addplot(df_chart['SMA50'], color='orange', width=1.5))
+        # SMA 50 (Blue)
+        if 'SMA_50' in df_chart.columns:
+            # Drop NaNs to prevent plotting errors
+            sma50_clean = df_chart['SMA_50'].dropna()
+            if not sma50_clean.empty:
+                # Use reindexed series to match df_chart index
+                ap.append(mpf.make_addplot(df_chart['SMA_50'], color='#29B6F6', width=1.5))
 
-        # SMA 200
-        if len(df) > 200:
-            df_chart['SMA200'] = df['Close'].rolling(window=200).mean().tail(252)
-            # Check if SMA200 has valid data in the visible range
-            if not df_chart['SMA200'].dropna().empty:
-                ap.append(mpf.make_addplot(df_chart['SMA200'], color='purple', width=1.5))
+        # SMA 200 (Orange)
+        if 'SMA_200' in df_chart.columns:
+            sma200_clean = df_chart['SMA_200'].dropna()
+            if not sma200_clean.empty:
+                ap.append(mpf.make_addplot(df_chart['SMA_200'], color='#FFA726', width=1.5))
 
         # 4. Style
         mc = mpf.make_marketcolors(
@@ -152,19 +182,22 @@ def draw_candlestick_chart(df, symbol, size, theme, out_png):
             volume=theme['accent'], ohlc='i'
         )
         
+        # Transparent background for video overlay
         grid_color = mcolors.to_hex(mcolors.to_rgba(CHART_TEXT_COLOR, alpha=0.15))
         s = mpf.make_mpf_style(marketcolors=mc, base_mpf_style='nightclouds', figcolor=config.BG_COLOR + '00', gridcolor=grid_color)
         
-        # 5. Plot (Handle "Volume key error" if volume missing)
+        # 5. Plot Arguments
         kwargs = dict(
             type='candle', 
             style=s, 
             title=f"\n{symbol} Price Action", 
             ylabel='Price (INR)', 
             figsize=(size[0]/100, size[1]/100), 
-            returnfig=True
+            returnfig=True,
+            tight_layout=True
         )
         
+        # Volume Check
         if 'Volume' in df_chart.columns and not df_chart['Volume'].empty:
              kwargs['volume'] = True
              kwargs['ylabel_lower'] = 'Volume'
@@ -172,29 +205,32 @@ def draw_candlestick_chart(df, symbol, size, theme, out_png):
         if ap:
             kwargs['addplot'] = ap
 
+        # 6. Generate Plot
         fig, axlist = mpf.plot(df_chart, **kwargs)
         
-        # 6. Formatting (Text Color)
+        # 7. Formatting (Text Color & Stroke)
         for ax in axlist:
             ax.yaxis.label.set_color(CHART_TEXT_COLOR)
             ax.yaxis.label.set_path_effects(TEXT_EFFECT)
             ax.xaxis.label.set_color(CHART_TEXT_COLOR)
             ax.xaxis.label.set_path_effects(TEXT_EFFECT)
+            
             for label in ax.get_xticklabels() + ax.get_yticklabels(): 
                 label.set_color(CHART_TEXT_COLOR)
                 label.set_path_effects(TEXT_EFFECT)
+                
             ax.set_facecolor((0,0,0,0))
             
         axlist[0].title.set_color(CHART_TEXT_COLOR)
         axlist[0].title.set_path_effects(TEXT_EFFECT)
         
+        # 8. Save
         fig.savefig(out_png, dpi=100, pad_inches=0.2, transparent=True)
         plt.close(fig)
         return out_png
         
     except Exception as e:
         print(f"      - ⚠️ Candlestick Chart Error: {e}")
-        # import traceback; traceback.print_exc()
         return None
 
 def draw_index_comparison_chart(df_stock, df_index, stock_name, index_name, size, theme, out_png):
