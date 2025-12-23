@@ -7,24 +7,26 @@ def get_consistent_voice_config():
     """Get consistent voice configuration for all TTS operations"""
     return {
         "en": {
-            "azure_voice": "en-US-AriaNeural",  # High-quality neural voice
+            # EDGE-TTS CONFIG
+            "edge_voice": "en-US-ChristopherNeural", # Deep, News Anchor Male
+            "edge_rate": "+15%",                     # Neural voices are slow, speed them up
+            "edge_pitch": "+0Hz",
+            
+            # LEGACY CONFIG
+            "azure_voice": "en-US-AriaNeural",
             "gtts_lang": "en",
-            "ssml_prosody": {
-                "rate": "120%",     # Slightly faster pace for better engagement (was 85%)
-                "pitch": "+5%",     # Slightly higher pitch for more engaging tone
-                "volume": "+5%",    # Slightly louder for clarity
-                "style": "friendly" # More conversational style
-            }
+            "ssml_prosody": {"rate": "120%", "pitch": "+5%", "volume": "+5%", "style": "friendly"}
         },
         "hi": {
-            "azure_voice": "hi-IN-SwaraNeural",  # High-quality Hindi neural voice
+            # EDGE-TTS CONFIG
+            "edge_voice": "hi-IN-SwaraNeural",       # High quality Female Hindi
+            "edge_rate": "+15%",
+            "edge_pitch": "+0Hz",
+
+            # LEGACY CONFIG
+            "azure_voice": "hi-IN-SwaraNeural",
             "gtts_lang": "hi",
-            "ssml_prosody": {
-                "rate": "120%",     # Slightly faster for Hindi (was 80%)
-                "pitch": "+5%",     # Higher pitch for engaging Hindi
-                "volume": "+5%",
-                "style": "cheerful" # More expressive for Hindi
-            }
+            "ssml_prosody": {"rate": "120%", "pitch": "+5%", "volume": "+5%", "style": "cheerful"}
         }
     }
 

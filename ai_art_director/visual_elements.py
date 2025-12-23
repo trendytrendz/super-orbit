@@ -1,5 +1,8 @@
 # ai_art_director/visual_elements.py
 # Refactored Facade v25.7.0 (COMPLETE)
+# NEW: Desi Viz
+from .visuals.desi_viz import render_cricket_scorecard, render_railway_map, render_rsi_thermometer
+
 
 # Core Utils
 from .visuals.core import (
@@ -29,5 +32,6 @@ from .visuals.slides import (
     render_cta_slide_circular,
     render_cta_slide_diamond
 )
+
 
 print("✅ visual_elements facade loaded.")
