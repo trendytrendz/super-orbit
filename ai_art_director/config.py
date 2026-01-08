@@ -27,6 +27,7 @@ AUDIO_VOICEOVERS_DIR = TMP_DIR / "voiceovers"
 AUDIO_CACHE_DIR = TMP_DIR / "audio_cache"
 AUDIO_FALLBACKS_DIR = TMP_DIR / "audio_fallbacks"
 TMP_IMG_DIR = TMP_DIR / "images"
+SFX_DIR = ASSETS_DIR / "audio" / "sfx"
 
 # --- SETTINGS ---
 VIDEO_W_LANDSCAPE, VIDEO_H_LANDSCAPE = 1280, 720
