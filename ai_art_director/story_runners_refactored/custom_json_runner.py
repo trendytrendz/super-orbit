@@ -148,15 +148,45 @@ class CustomJsonStory:
         raw_input = self.load_json_input(json_path)
         if raw_input is None: return
 
-        raw_list = raw_input if isinstance(raw_input, list) else (raw_input.get("data") or raw_input.get("news_items") or raw_input.get("items", []))
-        company = raw_input.get("company_name", "Update") if isinstance(raw_input, dict) else "Update"
+        # Handle List vs Dict
+        raw_list = []
+        company = None
+        
+        if isinstance(raw_input, list): 
+            raw_list = raw_input
+        elif isinstance(raw_input, dict):
+            raw_list = raw_input.get("data") or raw_input.get("news_items") or raw_input.get("items", [])
+            company = raw_input.get("company_name")
+        else:
+            return
 
+        # --- SMART COMPANY DETECTION ---
+        if not company and raw_list and len(raw_list) > 0:
+            first_item = raw_list[0]
+            if isinstance(first_item, dict):
+                if 'ticker' in first_item and first_item['ticker']:
+                    company = first_item['ticker']
+                elif 'headline' in first_item:
+                    company = first_item['headline'].split()[0]
+
+        if not company: company = "Market Watch"
+        
+        # 1. BUILD PLAYLIST
         slides_data = []
-        slides_data.append({'ticker': 'LIVE', 'headline': 'BREAKING NEWS', 'summary': f"Important updates for {company}.", 'theme': 'breaking_bar', 'is_intro': True})
+        
+        # Intro
+        if company == "Market Watch":
+            intro_summary = "Top stories developing right now."
+        else:
+            intro_summary = f"Important updates for {company}."
+            
+        slides_data.append({'ticker': 'LIVE', 'headline': 'BREAKING NEWS', 'summary': intro_summary, 'theme': 'breaking_bar', 'is_intro': True})
 
+        # Process Items
         for entry in raw_list:
             headline = entry.get('headline', '')
             summary = entry.get('summary', '')
+            
             hook = entry.get('hook')
             if not hook: hook = self.generate_hook_via_qwen(headline, summary)
             
@@ -164,8 +194,10 @@ class CustomJsonStory:
             entry['is_content'] = True
             slides_data.append(entry)
 
+        # Outro
         slides_data.append({'ticker': 'SUBSCRIBE', 'headline': 'STAY TUNED', 'summary': 'Subscribe now for daily updates.', 'theme': 'market_dashboard', 'is_outro': True})
 
+        # 2. GENERATE
         clips = []
         print(f"\n📊 Rendering {len(slides_data)} Segments...", flush=True)
         
@@ -173,12 +205,15 @@ class CustomJsonStory:
             try:
                 split_time = 2.0 
                 
+                # --- AUDIO STRATEGY ---
                 if item.get('is_content'):
-                    print(f"   🎙️ Seg {idx}: Punchy Split Audio...", flush=True)
+                    # Split Audio Strategy
+                    print(f"   🎙️ Seg {idx}: Genering Punchy Hook + Body...", flush=True)
                     audio_clip, split_time = self.generate_split_audio(item['hook_text'], item['summary'], idx)
                     if not audio_clip: continue
                     full_script = f"{item['hook_text']} ... {item['summary']}"
                 else:
+                    # Standard Strategy
                     script = item['summary']
                     filename = f"std_{idx}_{random.randint(100,999)}.mp3"
                     path = os.path.join(audio_generator.dirs["voiceovers"], filename)
@@ -189,10 +224,16 @@ class CustomJsonStory:
 
                 duration = audio_clip.duration + 0.5
                 
+                # --- THEME SELECTION ---
                 forced_theme = item.get('theme')
-                theme_key = forced_theme if (forced_theme and forced_theme in THEMES) else random.choice(VALID_RANDOM_THEMES)
-                if not forced_theme: print(f"      🎨 Auto-Theme: {theme_key}")
+                if forced_theme and forced_theme in THEMES:
+                    theme_key = forced_theme
+                else:
+                    theme_key = random.choice(VALID_RANDOM_THEMES)
+                    print(f"      🎨 Auto-Theme: {theme_key}")
 
+                # --- BACKGROUND ---
+                # Remove static check for vertical_ticker to allow dynamic BG
                 bg_path = compositor.get_smart_background_path(
                     item.get('ticker','NEWS'), 
                     item.get('headline',''), 
@@ -215,7 +256,9 @@ class CustomJsonStory:
                 else:
                     bg_clip = effects.apply_cinematic_effect(bg_path, duration, (1080, 1920))
 
+                # --- OVERLAY ---
                 if item.get('is_content'):
+                    # Sync transition with audio split
                     safe_split = max(1.0, split_time)
                     if safe_split > duration - 1.5: safe_split = duration / 2
                     
@@ -248,13 +291,12 @@ class CustomJsonStory:
 
                 video_clip = CompositeVideoClip(final_layers).set_duration(duration)
                 
-                # --- SFX MIXING (FIXED) ---
+                # --- SFX MIXING ---
                 final_audio_layers = [audio_clip]
                 
                 if item.get('is_content'):
-                    sfx_path = self.get_random_sfx() # Use the new robust selector
+                    sfx_path = self.get_random_sfx()
                     if sfx_path:
-                        # Sanitize the SFX first
                         sfx_clip = self.sanitize_audio(sfx_path)
                         if sfx_clip:
                             print(f"      🎵 SFX Added at {safe_split:.2f}s", flush=True)
