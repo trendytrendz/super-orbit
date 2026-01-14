@@ -1,17 +1,15 @@
-# ai_art_director/audio_generator.py
-# v24.2.29 - Config-Aware Absolute Paths
-
 import os
 import time
 import traceback
 import subprocess
 import sys
 import shutil
+import random
 from typing import Dict, List, Optional
 from pathlib import Path
 
 from . import utils
-from . import config # <--- CRITICAL IMPORT
+from . import config 
 
 # Import Hindi translator
 try:
@@ -30,7 +28,6 @@ class AudioGenerator:
     
     def setup_audio_directories(self):
         """Ensure audio directories exist using CONFIG ABSOLUTE PATHS"""
-        # Use the absolute paths from config.py
         self.dirs = {
             "voiceovers": str(config.AUDIO_VOICEOVERS_DIR),
             "cache": str(config.AUDIO_CACHE_DIR),
@@ -40,7 +37,11 @@ class AudioGenerator:
         for d in self.dirs.values():
             os.makedirs(d, exist_ok=True)
     
-    def generate_single_voiceover(self, text: str, output_path: str, lang: str = 'en') -> bool:
+    def generate_single_voiceover(self, text: str, output_path: str, lang: str = 'en', speed_adj=None) -> bool:
+        """
+        Generates TTS via Worker.
+        PRIORITY 3: Accepts speed_adj (e.g. "+20%") for Hook/Body variance.
+        """
         try:
             if not text or not text.strip():
                 return self.create_proper_silent_audio(output_path, duration=3.0)
@@ -50,8 +51,11 @@ class AudioGenerator:
             
             # CONFIG
             vc = config.get_voice_for_lang(lang)
-            edge_voice = vc.get("edge_voice", "en-IN-AashiNeural") 
-            edge_rate = vc.get("edge_rate", "+0%")
+            edge_voice = vc.get("edge_voice", "en-US-AriaNeural") 
+            
+            # --- RATE LOGIC ---
+            # If specific override provided, use it. Else use config default.
+            edge_rate = speed_adj if speed_adj else vc.get("edge_rate", "+0%")
             
             cmd = [
                 sys.executable, tts_worker_path, 
@@ -64,18 +68,10 @@ class AudioGenerator:
             # RUN WITH CAPTURE
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
             
-            # # --- ALWAYS PRINT DEBUG INFO ---
-            # if "Edge CLI Success" in result.stdout:
-            #     # print(f"      - {result.stdout.strip()}") # Uncomment for noisy success
-            #     pass
-            # else:
-            #     # If Edge didn't explicitly succeed, show me why
-            #     print(f"      - ⚠️ TTS Worker Output:\n{result.stdout}\n{result.stderr}")
-
             if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 100:
                 return True
             else:
-                print(f"      - ❌ TTS FAILED. RetCode: {result.returncode}")
+                # print(f"      - ❌ TTS FAILED. RetCode: {result.returncode}")
                 return self.create_proper_silent_audio(output_path, duration=4.0)
                 
         except Exception as e:

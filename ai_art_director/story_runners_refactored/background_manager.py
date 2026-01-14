@@ -1,6 +1,3 @@
-# story_runners_refactored/background_manager.py
-# v25.2.0 - Fixed: Randomize Pexels Images per Run
-
 import os
 import random
 import requests
@@ -9,147 +6,116 @@ from .. import config
 
 class BackgroundManager:
     def __init__(self):
-        # CRITICAL FIX: Use the absolute path from config
         self.tmp_dir = str(config.TMP_IMG_DIR)
-        
-        # Ensure the directory exists
         os.makedirs(self.tmp_dir, exist_ok=True)
-        
         self.api_key = config.PEXELS_API_KEY
-        
-        # Check validity
         self.has_valid_key = self.api_key and isinstance(self.api_key, str) and len(self.api_key) > 10
 
-    def fetch_contextual_backgrounds(self, company_name, summary, num_needed, video_format, specific_queries=None):
+    def fetch_smart_media(self, query, media_type="video"):
         """
-        Fetches backgrounds using direct HTTP requests to Pexels.
-        Saves files to the absolute config.TMP_IMG_DIR.
+        Smart router: Tries to fetch Video first (Priority 1), falls back to Image.
         """
-        # 1. Define Keywords
-        # We shuffle these base keywords so we don't always start with "finance"
-        base_keywords = [
-            "finance", "technology", "abstract", "business", 
-            "cityscape", "network", "stock market", "skyscraper",
-            "modern office", "chart", "growth", "money"
-        ]
-        random.shuffle(base_keywords)
+        if media_type == "video" and self.has_valid_key:
+            vid_path = self.fetch_vertical_video(query)
+            if vid_path: return vid_path
         
-        keywords = []
-        if specific_queries:
-            keywords.extend(specific_queries)
-        
-        keywords.extend(base_keywords)
+        # Fallback to image
+        res = self.fetch_contextual_backgrounds("", "", 1, "portrait", [query])
+        if res.get('bg_images'): return res['bg_images'][0]
+        return None
 
-        # 2. Attempt Fetch
-        if self.has_valid_key:
-            print(f"\n   -> Fetching {num_needed} unique backgrounds...")
-            images = self._search_images_direct(keywords, num_needed, video_format)
+    def fetch_vertical_video(self, query):
+        """
+        PRIORITY 1: Fetch Pexels Video (Vertical/Portrait).
+        """
+        print(f"      🎥 Searching Pexels Video for: '{query}'")
+        try:
+            headers = {'Authorization': self.api_key}
+            url = "https://api.pexels.com/videos/search"
+            params = {
+                'query': query,
+                'orientation': 'portrait',
+                'per_page': 5, # Fetch a few to filter
+                'size': 'medium' # Save bandwidth
+            }
             
-            if images and len(images) >= 1:
-                # If we didn't get enough, fill the rest with gradients
-                if len(images) < num_needed:
-                    needed = num_needed - len(images)
-                    print(f"   -> Filling {needed} missing slots with gradients.")
-                    gradients = self._create_color_backgrounds(needed, video_format)
-                    images.extend(gradients['bg_images'])
-                    
-                return {'bg_images': images, 'bg_credit': "Photos by Pexels"}
-        else:
-            print("   -> ⚠️ Pexels API Key missing/invalid. Skipping API.")
+            r = requests.get(url, headers=headers, params=params, timeout=10)
+            if r.status_code != 200: return None
+            
+            data = r.json()
+            videos = data.get('videos', [])
+            
+            if not videos: return None
+            
+            # Pick a random video from top 5
+            chosen_video = random.choice(videos)
+            
+            # Find the best MP4 file (prefer HD but not 4k, closest to 720/1080 width)
+            best_file = None
+            for vf in chosen_video['video_files']:
+                # Prefer HD (width ~720-1080)
+                if vf['file_type'] == 'video/mp4' and 500 < vf['width'] < 1200:
+                    best_file = vf
+                    break
+            
+            # Fallback to any mp4
+            if not best_file:
+                best_file = next((v for v in chosen_video['video_files'] if v['file_type'] == 'video/mp4'), None)
+                
+            if best_file:
+                download_url = best_file['link']
+                # Unique name
+                fname = f"vid_{query.replace(' ','_')}_{chosen_video['id']}.mp4"
+                save_path = os.path.join(self.tmp_dir, fname)
+                
+                # Check cache
+                if os.path.exists(save_path): return save_path
+                
+                # Stream Download
+                print(f"      ⬇️  Downloading Video ({best_file['width']}x{best_file['height']})...")
+                with requests.get(download_url, stream=True) as r:
+                    r.raise_for_status()
+                    with open(save_path, 'wb') as f:
+                        for chunk in r.iter_content(chunk_size=8192):
+                            f.write(chunk)
+                return save_path
+                
+        except Exception as e:
+            print(f"      ⚠️ Video Fetch Error: {e}")
+        return None
+
+    def fetch_contextual_backgrounds(self, company_name, summary, num_needed, video_format, specific_queries=None):
+        base_keywords = ["finance", "technology", "abstract", "business", "cityscape", "network"]
+        random.shuffle(base_keywords)
+        keywords = (specific_queries or []) + base_keywords
         
-        # 3. Fallback to Gradients
+        if self.has_valid_key:
+            return {'bg_images': self._search_images_direct(keywords, num_needed, video_format)}
         return self._create_color_backgrounds(num_needed, video_format)
 
     def _search_images_direct(self, keywords, max_images, video_format):
         paths = []
-        orientation = 'portrait' if video_format == 'portrait' else 'landscape'
         headers = {'Authorization': self.api_key}
-        
-        # Track what we've downloaded to avoid duplicates in this run
-        seen_urls = set()
-
         for q in keywords:
             if len(paths) >= max_images: break
-            
             try:
-                # FIX 1: Randomize the Page Number (1-10) to get deep results
-                # But for very specific queries (like company name), stick to page 1 first
-                page_num = 1
-                if q not in ["finance", "business"]: 
-                    # specific queries: try page 1 first
-                    page_num = 1
-                else:
-                    # generic queries: randomize heavily
-                    page_num = random.randint(1, 10)
-
-                print(f"      - 🔎 Searching: '{q}' (Page {page_num})")
-                url = "https://api.pexels.com/v1/search"
-                params = {
-                    'query': q,
-                    'per_page': 20, # Fetch more than needed
-                    'orientation': orientation,
-                    'size': 'large',
-                    'page': page_num
-                }
-                
-                response = requests.get(url, headers=headers, params=params, timeout=10)
-                
-                if response.status_code == 401:
-                    print("      - ❌ Pexels Unauthorized (Check API Key)")
-                    self.has_valid_key = False 
-                    break
-                
-                if response.status_code != 200:
-                    # If random page was too high (e.g. Page 10 of empty results), retry Page 1
-                    if page_num > 1:
-                        params['page'] = 1
-                        response = requests.get(url, headers=headers, params=params, timeout=10)
-                        if response.status_code != 200: continue
-                    else:
-                        continue
-                    
-                data = response.json()
-                photos = data.get('photos', [])
-                
-                if not photos: continue
-                
-                # FIX 2: Shuffle the results from this page
-                random.shuffle(photos)
-                
-                for photo in photos:
-                    if len(paths) >= max_images: break
-                    
-                    img_url = photo['src']['large2x']
-                    
-                    if img_url in seen_urls: continue
-                    seen_urls.add(img_url)
-                    
-                    # Create unique filename with random ID to prevent overwriting
-                    clean_q = "".join(x for x in q if x.isalnum())
-                    # Using random.randint ensures filename is different even for same query
-                    filename = f"bg_{clean_q}_{random.randint(1000, 9999)}.jpg"
-                    save_path = os.path.join(self.tmp_dir, filename)
-                    
-                    if self._download(img_url, save_path):
-                        paths.append(save_path)
-                        # Only take 1 or 2 photos per keyword to ensure variety
-                        if len(paths) % 2 == 0: 
-                            break 
-                                
-            except Exception as e:
-                print(f"      - ⚠️ Search Error for '{q}': {e}") 
-                continue
-                
+                url = f"https://api.pexels.com/v1/search?query={q}&per_page=15&orientation={'portrait' if video_format=='portrait' else 'landscape'}"
+                r = requests.get(url, headers=headers, timeout=10)
+                if r.status_code == 200:
+                    photos = r.json().get('photos', [])
+                    random.shuffle(photos)
+                    for p in photos:
+                        if len(paths) >= max_images: break
+                        save_path = os.path.join(self.tmp_dir, f"bg_{q}_{p['id']}.jpg")
+                        if self._download(p['src']['large2x'], save_path): paths.append(save_path)
+            except: pass
         return paths
 
     def _download(self, url, path):
         try:
-            r = requests.get(url, timeout=10)
-            if r.status_code == 200:
-                with open(path, 'wb') as f: f.write(r.content)
-                return True
-        except: pass
-        return False
+            with open(path, 'wb') as f: f.write(requests.get(url).content)
+            return True
+        except: return False
 
     def _create_color_backgrounds(self, num_needed, video_format):
         print(f"   -> 🎨 Creating {num_needed} gradient backgrounds.")
@@ -165,7 +131,7 @@ class BackgroundManager:
                 ("#232526", "#414345", "#414345"), # Midnight
                 ("#1A2980", "#26D0CE", "#26D0CE")  # Aqua
             ]
-            random.shuffle(schemes) # Shuffle schemes too
+            random.shuffle(schemes) 
             
             for i in range(num_needed):
                 colors = schemes[i % len(schemes)]
